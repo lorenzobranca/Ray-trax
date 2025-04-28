@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 import jax
 import jax.numpy as jnp
@@ -29,7 +29,7 @@ J_numeric = compute_radiation_field_from_source(
     emissivity,
     kappa,
     source_pos=source_pos,
-    num_rays=2000,
+    num_rays=8000,
     step_size=0.5,
     max_steps=400
 )
