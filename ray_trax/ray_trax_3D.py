@@ -1,29 +1,17 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 from functools import partial
+from jax.sharding import NamedSharding, PartitionSpec as P
 
-
-@partial(jax.jit, static_argnames=["num_rays", "step_size", "max_steps"])
-def compute_radiation_field_from_source(j_map, kappa_map, source_pos, num_rays=1000, step_size=0.5, max_steps=500):
-
-    """
-    Compute the radiation field in 3D space from a single distributed source via ray tracing.
-
-    Parameters:
-        j_map (3D array): emissivity field
-        kappa_map (3D array): opacity field
-        source_pos (array-like of shape (3,)): starting point of rays
-        num_rays (int): number of directions to sample
-        step_size (float): step size along rays
-        max_steps (int): max steps per ray
-
-    Returns:
-        3D array: accumulated radiation field
-    """
-
+@partial(jax.jit, static_argnames=["num_rays", "step_size", "max_steps", "use_sharding"])
+def compute_radiation_field_from_source(
+    j_map, kappa_map, source_pos,
+    num_rays=1000, step_size=0.5, max_steps=500,
+    use_sharding=False
+):
     Nx, Ny, Nz = j_map.shape
 
-    # === Sample directions uniformly on the unit sphere using the Fibonacci method ===
     def sample_sphere(n):
         i = jnp.arange(0, n)
         golden_ratio = (1 + jnp.sqrt(5)) / 2
@@ -35,7 +23,6 @@ def compute_radiation_field_from_source(j_map, kappa_map, source_pos, num_rays=1
         z = cos_theta
         return jnp.stack([x, y, z], axis=1)
 
-    directions = sample_sphere(num_rays)
 
     # === Trilinear interpolation / deposition operator ===
 
@@ -87,56 +74,89 @@ def compute_radiation_field_from_source(j_map, kappa_map, source_pos, num_rays=1
                 updates = updates.at[ix, iy, iz].add(w * value)
             return grid + updates
 
-    # === Trace one ray from the source in a given direction ===
+
+    directions = sample_sphere(num_rays)
+
     def trace_single_ray(direction):
         def body_fn(i, state):
             x, y, z, I, tau, J = state
-
-            # Interpolate local emissivity and opacity
             j_val = trilinear_op(j_map, x, y, z, mode="interp")
             kappa_val = trilinear_op(kappa_map, x, y, z, mode="interp")
-
-            # Step updates
             ds = step_size
             d_tau = kappa_val * ds
             dI = j_val * jnp.exp(-tau) * ds
-
-            
-            # Update intensity and optical depth
             I_new = I * jnp.exp(-d_tau) + dI
             tau_new = tau + d_tau
-
-            # Deposit the current intensity in the radiation field
             J = trilinear_op(J, x, y, z, value=I_new, mode="deposit")
-
-            # Move to next position along ray
             x_new = x + direction[0] * ds
             y_new = y + direction[1] * ds
             z_new = z + direction[2] * ds
             return (x_new, y_new, z_new, I_new, tau_new, J)
 
-        # Initialize state at source
         x0, y0, z0 = source_pos
         initial = (x0, y0, z0, 0.0, 0.0, jnp.zeros_like(j_map))
-
-        # March forward along the ray
         _, _, _, _, _, J_ray = jax.lax.fori_loop(0, max_steps, body_fn, initial)
         return J_ray
+    '''
+    if use_pmap:
+        n_devices = jax.device_count()
+        if num_rays % n_devices != 0:
+            raise ValueError(f"num_rays ({num_rays}) must be divisible by number of devices ({n_devices}) for pmap.")
 
-    # === Trace all rays in parallel ===
-    J_all = jax.vmap(trace_single_ray)(directions)
+        rays_per_device = num_rays // n_devices
+        directions_sharded = directions.reshape((n_devices, rays_per_device, 3))
 
-    # Normalize by the total solid angle
+        @partial(jax.pmap, axis_name='devices')
+        def trace_ray_batch(dir_batch):
+            return jax.vmap(trace_single_ray)(dir_batch)  # [rays_per_device, Nx, Ny, Nz]
+
+        J_all_sharded = trace_ray_batch(directions_sharded)  # [n_devices, rays_per_device, Nx, Ny, Nz]
+        J_all = J_all_sharded.reshape((num_rays, *j_map.shape))  # [num_rays, Nx, Ny, Nz]
+    '''
+    if use_sharding:
+        # Build mesh and sharding
+        devices = jax.devices()
+        n_devices = len(devices)
+
+        if num_rays % n_devices != 0:
+            raise ValueError(f"num_rays ({num_rays}) must be divisible by number of devices ({n_devices}).")
+
+        mesh_shape = (n_devices,)
+        mesh = jax.sharding.Mesh(np.array(devices).reshape(mesh_shape), axis_names=('x',))
+        sharding = NamedSharding(mesh, P('x', None))  # rays over 'x', each ray is a (3,) vector
+
+        # Reshape and shard directions
+        directions_reshaped = directions.reshape((n_devices, -1, 3))
+        directions_sharded = jax.device_put(directions_reshaped, sharding)
+
+        # Apply vmap over each shard
+        @jax.vmap  # Automatically parallel within each device
+        def trace_ray_batch(dir_batch):
+            return jax.vmap(trace_single_ray)(dir_batch)
+
+        with mesh:
+            J_all_sharded = trace_ray_batch(directions_sharded)  # [n_devices, rays_per_device, Nx, Ny, Nz]
+
+        # Merge all rays
+        J_all = J_all_sharded.reshape((num_rays, *j_map.shape))  # [num_rays, Nx, Ny, Nz]
+    else:
+        # No sharding: simple vmap over all rays
+        J_all = jax.vmap(trace_single_ray)(directions)
+
+    # Sum over all rays
     return jnp.sum(J_all, axis=0) * (4 * jnp.pi / num_rays)
 
 
 def compute_radiation_field_from_multiple_sources(
     j_map, kappa_map, source_positions,
-    num_rays=1000, step_size=0.5, max_steps=500
+    num_rays=1000, step_size=0.5, max_steps=500,
+    use_sharding=False
 ):
+    
+
     """
     Computes the total radiation field from multiple sources in 3D using ray tracing.
-    
+
     Parameters:
         j_map (3D array): emissivity map
         kappa_map (3D array): absorption coefficient map
@@ -144,19 +164,28 @@ def compute_radiation_field_from_multiple_sources(
         num_rays (int): number of rays per source
         step_size (float): ray marching step size
         max_steps (int): number of steps per ray
+        use_sharding (bool): whether to use multi-GPU parallelization
 
     Returns:
         3D array: total radiation field
     """
+
+
+
+    
     J_total = jnp.zeros_like(j_map)
     for source_pos in source_positions:
         J_total += compute_radiation_field_from_source(
-            j_map,
-            kappa_map,
-            source_pos=jnp.array(source_pos),
-            num_rays=num_rays,
-            step_size=step_size,
-            max_steps=max_steps
-        )
+                j_map,
+                kappa_map,
+                source_pos=jnp.array(source_pos),
+                num_rays=num_rays,
+                step_size=step_size,
+                max_steps=max_steps,
+                use_sharding = use_sharding
+
+            )
+
     return J_total
+
 

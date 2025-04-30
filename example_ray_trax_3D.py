@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "8, 9"
 
 import sys
 import jax
@@ -17,13 +17,13 @@ import time
 
 # Config
 Nx, Ny, Nz = 64, 64, 64
-key = random.PRNGKey(42)
+key = random.PRNGKey(111)
 
 # Generate absorption field and mask
 kappa, mask = generate_correlated_lognormal_field_3D(
     key, shape=(Nx, Ny, Nz),
     mean=1.0, length_scale=0.05,
-    sigma_g=1.2, percentile=99
+    sigma_g=1.2, percentile=99.5
 )
 
 
@@ -35,13 +35,13 @@ star_positions = star_indices.astype(jnp.float32) + 0.5
 # Create emissivity field
 emissivity = jnp.zeros((Nx, Ny))
 for pos in star_positions:
-    emissivity += gaussian_emissivity(Nx, Ny, Nz, center=pos, amplitude=1e3, width=5.0)
+    emissivity += gaussian_emissivity(Nx, Ny, Nz, center=pos, amplitude=1e3, width=1.0)
 
 # Ray tracing
 tstart = time.time()
 J_multi = compute_radiation_field_from_multiple_sources(
     emissivity, kappa, star_positions,
-    num_rays=4000, step_size=0.5, max_steps=400
+    num_rays=4096, step_size=0.5, max_steps=400, use_sharding = True
 )
 tend = time.time()
 print("Total time: ", tend - tstart)
