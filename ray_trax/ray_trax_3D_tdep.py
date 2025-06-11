@@ -89,7 +89,13 @@ def compute_radiation_field_from_source_with_time_step(
         def body_fn(i, state):
             x, y, z, I, tau, J = state
             j_val = trilinear_op(j_map, x, y, z, mode="interp")
-            kappa_val = trilinear_op(kappa_map, x, y, z, mode="interp")
+            kappa_val = trilinear_op(kappa_map, x, y, z, mode="interp") #maybe issue, see possible fixing below
+            #ix = jnp.clip(jnp.floor(x).astype(int), 0, Nx - 1)
+            #iy = jnp.clip(jnp.floor(y).astype(int), 0, Ny - 1)
+            #iz = jnp.clip(jnp.floor(y).astype(int), 0, Nz - 1)
+
+            #kappa_val = kappa_map[ix,iy,iz]
+
             d_tau = kappa_val * step_size
             dI = j_val * jnp.exp(-tau) * step_size
             I_new = I * jnp.exp(-d_tau) + dI

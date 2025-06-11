@@ -16,7 +16,7 @@ import time
 
 
 # Config
-Nx, Ny, Nz = 64, 64, 64
+Nx, Ny, Nz = 128, 128, 128
 key = random.PRNGKey(111)
 
 # Generate absorption field and mask

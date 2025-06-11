@@ -24,7 +24,7 @@ total_raw = jnp.sum(raw_emissivity)
 emissivity = raw_emissivity * (L / total_raw)  # Normalized to have total luminosity L
 
 # Compute numerical radiation field using ray tracing
-J_numeric = compute_radiation_field_from_star(
+J_numeric = compute_radiation_field_from_source(
     emissivity,
     kappa,
     source_pos=source_pos,

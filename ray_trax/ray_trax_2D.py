@@ -64,8 +64,15 @@ def compute_radiation_field_from_source(j_map, kappa_map, source_pos, num_rays=3
 
         def body_fn(i, state):
             x, y, I, tau, J = state
+
+            #just a try
+            ix = jnp.clip(jnp.floor(x).astype(int), 0, Nx-1)
+            iy = jnp.clip(jnp.floor(y).astype(int), 0, Ny-1)
+
             j_val = bilinear_op(j_map, x, y, mode="interp")
-            kappa_val = bilinear_op(kappa_map, x, y, mode="interp")
+            #j_val = j_map[ix, iy]
+            #kappa_val = bilinear_op(kappa_map, x, y, mode="interp")
+            kappa_val = kappa_map[ix, iy]
             ds = step_size
             d_tau = kappa_val * ds
             dI = j_val * jnp.exp(-tau) * ds
@@ -73,6 +80,7 @@ def compute_radiation_field_from_source(j_map, kappa_map, source_pos, num_rays=3
             I_new = I*jnp.exp(-d_tau) + dI
             tau_new = tau + d_tau
             J = bilinear_op(J, x, y, value=I_new, mode="deposit")
+            #J = J.at[ix, iy].add(I_new)
             x_new = x + direction[0] * ds
             y_new = y + direction[1] * ds
             return (x_new, y_new, I_new, tau_new, J)
@@ -97,7 +105,7 @@ def compute_radiation_field_from_multiple_sources(
     ):
     J_total = jnp.zeros_like(j_map)
     for source_pos in source_positions:
-        J_total += compute_radiation_field_from_star(
+        J_total += compute_radiation_field_from_source(
             j_map, kappa_map, source_pos,
             num_rays=num_rays,
             step_size=step_size,

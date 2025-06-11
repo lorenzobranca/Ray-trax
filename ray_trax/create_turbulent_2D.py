@@ -49,13 +49,13 @@ def generate_correlated_lognormal_field(
     fft_field = amplitude * phases
 
     # Hermitian symmetry for real field
-    if Nx % 2 == 0:
-        fft_field = fft_field.at[Nx // 2, :].set(fft_field[Nx // 2, :].real)
-    if Ny % 2 == 0:
-        fft_field = fft_field.at[:, Ny // 2].set(fft_field[:, Ny // 2].real)
-    ix = jnp.arange(0, Nx // 2)
-    iy = jnp.arange(0, Ny // 2)
-    fft_field = fft_field.at[-ix[:, None], -iy[None, :]].set(jnp.conj(fft_field[ix[:, None], iy[None, :]]))
+    #if Nx % 2 == 0:
+    #    fft_field = fft_field.at[Nx // 2, :].set(fft_field[Nx // 2, :].real)
+    #if Ny % 2 == 0:
+    #    fft_field = fft_field.at[:, Ny // 2].set(fft_field[:, Ny // 2].real)
+    #ix = jnp.arange(0, Nx // 2)
+    #iy = jnp.arange(0, Ny // 2)
+    #fft_field = fft_field.at[-ix[:, None], -iy[None, :]].set(jnp.conj(fft_field[ix[:, None], iy[None, :]]))
 
     # --- Step 4: Inverse FFT → correlated Gaussian field
     g = jnp.fft.ifft2(fft_field).real
