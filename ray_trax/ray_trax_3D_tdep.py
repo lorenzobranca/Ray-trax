@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-import numpy as np
 from functools import partial
 
 def sample_sphere(n):
@@ -14,7 +13,7 @@ def sample_sphere(n):
     z = cos_theta
     return jnp.stack([x, y, z], axis=1)
 
-def trilinear_deposit(grid, x, y, z, value):
+def trilinear_op(grid, x, y, z, value=None, mode="interp"):
     Nx, Ny, Nz = grid.shape
     x0 = jnp.floor(x).astype(int)
     y0 = jnp.floor(y).astype(int)
@@ -23,7 +22,7 @@ def trilinear_deposit(grid, x, y, z, value):
     y1 = jnp.clip(y0 + 1, 0, Ny - 1)
     z1 = jnp.clip(z0 + 1, 0, Nz - 1)
     x0 = jnp.clip(x0, 0, Nx - 1)
-    y0 = jnp.clip(y0, 0, Ny - 1)
+    y0 = jnp.clip(y0, 0, Nz - 1)
     z0 = jnp.clip(z0, 0, Nz - 1)
 
     dx = x - x0
@@ -41,101 +40,98 @@ def trilinear_deposit(grid, x, y, z, value):
         dx * dy * dz
     ])
 
-    indices = [
-        (x0, y0, z0), (x0, y0, z1), (x0, y1, z0), (x0, y1, z1),
-        (x1, y0, z0), (x1, y0, z1), (x1, y1, z0), (x1, y1, z1)
-    ]
+    if mode == "interp":
+        values = jnp.array([
+            grid[x0, y0, z0], grid[x0, y0, z1],
+            grid[x0, y1, z0], grid[x0, y1, z1],
+            grid[x1, y0, z0], grid[x1, y0, z1],
+            grid[x1, y1, z0], grid[x1, y1, z1]
+        ])
+        return jnp.sum(weights * values)
+    elif mode == "deposit":
+        assert value is not None
+        updates = jnp.zeros_like(grid)
+        indices = [
+            (x0, y0, z0), (x0, y0, z1), (x0, y1, z0), (x0, y1, z1),
+            (x1, y0, z0), (x1, y0, z1), (x1, y1, z0), (x1, y1, z1)
+        ]
+        for w, (ix, iy, iz) in zip(weights, indices):
+            updates = updates.at[ix, iy, iz].add(w * value)
+        return grid + updates
+@partial(jax.jit, static_argnames=[
+    "num_rays", "step_size", "use_sharding", "max_steps", "radiation_velocity", "step_size"
+])
 
-    for w, (ix, iy, iz) in zip(weights, indices):
-        grid = grid.at[ix, iy, iz].add(w * value)
-    return grid
-
-@partial(jax.jit, static_argnames=["num_rays", "step_size", "max_steps", "nt"])
-def compute_time_dependent_radiation_field(
+def compute_radiation_field_from_source_with_time_step(
     j_map, kappa_map, source_pos,
-    num_rays=1000, step_size=0.5, max_steps=500,
-    nt=100  # number of time steps
+    num_rays=1000, step_size=0.5,
+    max_steps = None,
+    radiation_velocity=1.0, time_step=1.0,
+    use_sharding=False
 ):
+    """
+    Compute the radiation field within one time step (propagation distance = c * dt).
+    """
     Nx, Ny, Nz = j_map.shape
     directions = sample_sphere(num_rays)
-    I_grid = jnp.zeros((nt, Nx, Ny, Nz))
+    
+    if max_steps is None:
+        max_distance = radiation_velocity * time_step
+        max_steps = jnp.ceil(max_distance / step_size).astype(int)
+
 
     def trace_single_ray(direction):
         x, y, z = source_pos
         I = 0.0
         tau = 0.0
-        intensity_steps = []
+        J = jnp.zeros_like(j_map)
 
-        for t in range(nt):
-            j_val = j_map[int(jnp.clip(x, 0, Nx-1)),
-                          int(jnp.clip(y, 0, Ny-1)),
-                          int(jnp.clip(z, 0, Nz-1))]
-            kappa_val = kappa_map[int(jnp.clip(x, 0, Nx-1)),
-                                  int(jnp.clip(y, 0, Ny-1)),
-                                  int(jnp.clip(z, 0, Nz-1))]
-            ds = step_size
-            d_tau = kappa_val * ds
-            dI = j_val * jnp.exp(-tau) * ds
-            I = I * jnp.exp(-d_tau) + dI
-            tau += d_tau
-            intensity_steps.append((t, x, y, z, I))
+        def body_fn(i, state):
+            x, y, z, I, tau, J = state
+            j_val = trilinear_op(j_map, x, y, z, mode="interp")
+            kappa_val = trilinear_op(kappa_map, x, y, z, mode="interp")
+            d_tau = kappa_val * step_size
+            dI = j_val * jnp.exp(-tau) * step_size
+            I_new = I * jnp.exp(-d_tau) + dI
+            tau_new = tau + d_tau
+            J = trilinear_op(J, x, y, z, value=I_new, mode="deposit")
+            x_new = x + direction[0] * step_size
+            y_new = y + direction[1] * step_size
+            z_new = z + direction[2] * step_size
+            return (x_new, y_new, z_new, I_new, tau_new, J)
 
-            # Move ray forward
-            x += direction[0] * ds
-            y += direction[1] * ds
-            z += direction[2] * ds
+        state_init = (x, y, z, I, tau, J)
+        final_state = jax.lax.fori_loop(0, max_steps, body_fn, state_init)
+        return final_state[-1]  # Return J
 
-        return intensity_steps
+    if use_sharding:
+        # Placeholder: implement sharding if needed
+        raise NotImplementedError("Sharding not implemented yet.")
+    else:
+        J_all = jax.vmap(trace_single_ray)(directions)
 
-    # Run for all rays
-    all_ray_data = jax.vmap(trace_single_ray)(directions)
-
-    # Deposit into time-dependent grid
-    for ray_steps in all_ray_data:
-        for t, x, y, z, Ival in ray_steps:
-            I_grid = trilinear_deposit(I_grid.at[t], x, y, z, Ival)
-
-    return I_grid
+    return jnp.sum(J_all, axis=0) * (4 * jnp.pi / num_rays)
 
 
-def compute_radiation_field_from_multiple_sources(
+
+def compute_radiation_field_from_multiple_sources_with_time_step(
     j_map, kappa_map, source_positions,
-    num_rays=1000, step_size=0.5, max_steps=500,
+    num_rays=1000, step_size=0.5,
+    radiation_velocity=1.0, time_step=1.0,
     use_sharding=False
 ):
-
-
     """
-    Computes the total radiation field from multiple sources in 3D using ray tracing.
-
-    Parameters:
-        j_map (3D array): emissivity map
-        kappa_map (3D array): absorption coefficient map
-        source_positions (array of shape [N_sources, 3]): list of 3D coordinates of sources
-        num_rays (int): number of rays per source
-        step_size (float): ray marching step size
-        max_steps (int): number of steps per ray
-        use_sharding (bool): whether to use multi-GPU parallelization
-
-    Returns:
-        3D array: total radiation field
+    Compute the radiation field within one time step from multiple sources.
     """
-
-
-
-
-    J_total = jnp.zeros_like(j_map)
+    I_total = jnp.zeros_like(j_map)
     for source_pos in source_positions:
-        J_total += compute_radiation_field_from_source(
-                j_map,
-                kappa_map,
-                source_pos=jnp.array(source_pos),
-                num_rays=num_rays,
-                step_size=step_size,
-                max_steps=max_steps,
-                use_sharding = use_sharding
-
-            )
-
-    return J_total
+        I_total += compute_radiation_field_from_source_with_time_step(
+            j_map, kappa_map, source_pos,
+            num_rays=num_rays,
+            step_size=step_size,
+            radiation_velocity=radiation_velocity,
+            time_step=time_step,
+            use_sharding=use_sharding
+        )
+    return I_total
 
