@@ -1,11 +1,13 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "4"  # or whatever GPU you prefer
+os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 
 import time
+import numpy as np
 import jax
 import jax.numpy as jnp
 from jax import random
 import matplotlib.pyplot as plt
+import imageio
 
 from ray_trax.create_turbulent_3D import generate_correlated_lognormal_field_3D
 from ray_trax.utils import gaussian_emissivity
@@ -35,85 +37,55 @@ for pos in star_positions:
 
 # Time-stepping parameters
 total_time = 10.0
-dt = 200.0
+dt = 1.0
 c = 1.0  # Speed of light in code units
 
-# Initialize cumulative radiation field
-J_total = jnp.zeros((Nx, Ny, Nz))
+output_dir = 'plots_3d_time_dep'
+os.makedirs(output_dir, exist_ok=True)
 
 tstart = time.time()
+filenames = []
 
-'''
 for step in range(int(total_time / dt)):
     print(f"Time step {step + 1}/{int(total_time / dt)}")
 
-    # Here you could update kappa or emissivity dynamically if needed
-    # e.g. kappa = update_kappa(...)
-    # e.g. emissivity = update_emissivity(...)
 
     J_step = compute_radiation_field_from_multiple_sources_with_time_step(
         emissivity, kappa, star_positions,
         num_rays=4096,
         step_size=0.5,
         radiation_velocity=c,
-        time_step=dt
-    )
-    J_total += J_step
-'''
-
-J_total = compute_radiation_field_from_multiple_sources_with_time_step(
-        emissivity, kappa, star_positions,
-        num_rays=4096,
-        step_size=0.5,
-        radiation_velocity=c,
-        time_step=dt
+        time_step=dt * step,
+        use_sharding=False
     )
 
+    # Force evaluation and break JAX graph
+    J_step.block_until_ready()
+    J_step = np.array(J_step)
+
+    # Plot snapshot
+    mid_z = Nz // 2
+    plt.figure(figsize=(6, 5))
+    plt.imshow(np.log10(J_step[:, :, mid_z] + 1e-6), origin='lower', cmap='inferno')
+    plt.title(f"X-Y plane at Z={mid_z} - Time step {step+1}")
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.colorbar(label="log10(Intensity)")
+    plt.tight_layout()
+    filename = os.path.join(output_dir, f'step_{step:03d}.png')
+    plt.savefig(filename)
+    filenames.append(filename)
+    plt.close()
 
 tend = time.time()
 print("Total simulation time:", tend - tstart)
 
+# Create GIF
+gif_filename = os.path.join(output_dir, 'radiation_evolution.gif')
+with imageio.get_writer(gif_filename, mode='I', duration=0.5, loop = 0) as writer:
+    for filename in filenames:
+        image = imageio.imread(filename)
+        writer.append_data(image)
 
-output_dir = 'plots_3d_time_dep'
-os.makedirs(output_dir, exist_ok=True)
-
-# Plot results
-mid_x = Nx // 2
-mid_y = Ny // 2
-mid_z = Nz // 2
-
-# Plot x-y plane at fixed z
-plt.figure(figsize=(6, 5))
-plt.imshow(jnp.log10(J_total[:, :, mid_z] + 1e-6), origin='lower', cmap='inferno')
-plt.title(f"Cumulative X-Y plane at Z={mid_z}")
-plt.xlabel("X")
-plt.ylabel("Y")
-plt.colorbar(label="log10(Intensity)")
-plt.tight_layout()
-plt.savefig(os.path.join(output_dir, 'xy_plane.png'))
-plt.close()
-
-# Plot x-z plane at fixed y
-plt.figure(figsize=(6, 5))
-plt.imshow(jnp.log10(J_total[:, mid_y, :] + 1e-6), origin='lower', cmap='inferno', aspect=Nz/Nx)
-plt.title(f"Cumulative X-Z plane at Y={mid_y}")
-plt.xlabel("X")
-plt.ylabel("Z")
-plt.colorbar(label="log10(Intensity)")
-plt.tight_layout()
-plt.savefig(os.path.join(output_dir, 'xz_plane.png'))
-plt.close()
-
-# Plot y-z plane at fixed x
-plt.figure(figsize=(6, 5))
-plt.imshow(jnp.log10(J_total[mid_x, :, :] + 1e-6), origin='lower', cmap='inferno', aspect=Nz/Ny)
-plt.title(f"Cumulative Y-Z plane at X={mid_x}")
-plt.xlabel("Y")
-plt.ylabel("Z")
-plt.colorbar(label="log10(Intensity)")
-plt.tight_layout()
-plt.savefig(os.path.join(output_dir, 'yz_plane.png'))
-plt.close()
-
-print("All plots saved to", output_dir)
+print("GIF saved to", gif_filename)
 
