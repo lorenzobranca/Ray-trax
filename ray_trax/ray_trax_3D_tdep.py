@@ -1,6 +1,8 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 from functools import partial
+from jax.sharding import NamedSharding, PartitionSpec as P
 
 def sample_sphere(n):
     i = jnp.arange(0, n)
@@ -89,12 +91,12 @@ def compute_radiation_field_from_source_with_time_step(
         def body_fn(i, state):
             x, y, z, I, tau, J = state
             j_val = trilinear_op(j_map, x, y, z, mode="interp")
-            kappa_val = trilinear_op(kappa_map, x, y, z, mode="interp") #maybe issue, see possible fixing below
-            #ix = jnp.clip(jnp.floor(x).astype(int), 0, Nx - 1)
-            #iy = jnp.clip(jnp.floor(y).astype(int), 0, Ny - 1)
-            #iz = jnp.clip(jnp.floor(y).astype(int), 0, Nz - 1)
+            #kappa_val = trilinear_op(kappa_map, x, y, z, mode="interp") #maybe issue, see possible fixing below
+            ix = jnp.clip(jnp.floor(x).astype(int), 0, Nx - 1)
+            iy = jnp.clip(jnp.floor(y).astype(int), 0, Ny - 1)
+            iz = jnp.clip(jnp.floor(y).astype(int), 0, Nz - 1)
 
-            #kappa_val = kappa_map[ix,iy,iz]
+            kappa_val = kappa_map[ix,iy,iz]
 
             d_tau = kappa_val * step_size
             dI = j_val * jnp.exp(-tau) * step_size
@@ -111,15 +113,39 @@ def compute_radiation_field_from_source_with_time_step(
         return final_state[-1]  # Return J
 
     if use_sharding:
-        # Placeholder: implement sharding if needed
-        raise NotImplementedError("Sharding not implemented yet.")
+        # Build mesh and sharding
+        devices = jax.devices()
+        n_devices = len(devices)
+
+        if num_rays % n_devices != 0:
+            raise ValueError(f"num_rays ({num_rays}) must be divisible by number of devices ({n_devices}).")
+
+        mesh_shape = (n_devices,)
+        mesh = jax.sharding.Mesh(np.array(devices).reshape(mesh_shape), axis_names=('x',))
+        sharding = NamedSharding(mesh, P('x', None))  # rays over 'x', each ray is a (3,) vector
+
+        # Reshape and shard directions
+        directions_reshaped = directions.reshape((n_devices, -1, 3))
+        directions_sharded = jax.device_put(directions_reshaped, sharding)
+
+        # Apply vmap over each shard
+        @jax.vmap  # Automatically parallel within each device
+        def trace_ray_batch(dir_batch):
+            return jax.vmap(trace_single_ray)(dir_batch)
+
+        with mesh:
+            J_all_sharded = trace_ray_batch(directions_sharded)  # [n_devices, rays_per_device, Nx, Ny, Nz]
+
+        # Merge all rays
+        J_all = J_all_sharded.reshape((num_rays, *j_map.shape))  # [num_rays, Nx, Ny, Nz]
+
     else:
         J_all = jax.vmap(trace_single_ray)(directions)
 
     return jnp.sum(J_all, axis=0) * (4 * jnp.pi / num_rays)
 
 
-
+'''
 def compute_radiation_field_from_multiple_sources_with_time_step(
     j_map, kappa_map, source_positions,
     num_rays=1000, step_size=0.5,
@@ -140,4 +166,32 @@ def compute_radiation_field_from_multiple_sources_with_time_step(
             use_sharding=use_sharding
         )
     return I_total
+'''
 
+def compute_radiation_field_from_multiple_sources_with_time_step(
+    j_map, kappa_map, source_positions,
+    num_rays=1000, step_size=0.5,
+    radiation_velocity=1.0, time_step=1.0,
+    use_sharding=False
+):
+    """
+    Compute the radiation field within one time step from multiple sources using lax.fori_loop.
+    """
+
+    def body_fn(i, I_total):
+        source_pos = source_positions[i]
+        I_new = compute_radiation_field_from_source_with_time_step(
+            j_map, kappa_map, source_pos,
+            num_rays=num_rays,
+            step_size=step_size,
+            radiation_velocity=radiation_velocity,
+            time_step=time_step,
+            use_sharding=use_sharding
+        )
+        return I_total + I_new
+
+    num_sources = source_positions.shape[0]
+    I_total = jnp.zeros_like(j_map)
+    I_total = jax.lax.fori_loop(0, num_sources, body_fn, I_total)
+
+    return I_total

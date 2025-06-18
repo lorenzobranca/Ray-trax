@@ -1,5 +1,6 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "7"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0, 3, 4, 5, 6, 7, 8, 9"
+import gc
 
 import time
 import numpy as np
@@ -16,14 +17,14 @@ from ray_trax.ray_trax_3D_tdep import (
 )
 
 # Config
-Nx, Ny, Nz = 64, 64, 64
+Nx, Ny, Nz = 128, 128, 128
 key = random.PRNGKey(111)
 
 # Generate absorption field and mask
 kappa, mask = generate_correlated_lognormal_field_3D(
     key, shape=(Nx, Ny, Nz),
     mean=1.0, length_scale=0.05,
-    sigma_g=1.2, percentile=99.5
+    sigma_g=1.2, percentile=99.99
 )
 
 # Get star positions
@@ -56,7 +57,7 @@ for step in range(int(total_time / dt)):
         step_size=0.5,
         radiation_velocity=c,
         time_step=dt * step,
-        use_sharding=False
+        use_sharding=True
     )
 
     # Force evaluation and break JAX graph
@@ -76,6 +77,10 @@ for step in range(int(total_time / dt)):
     plt.savefig(filename)
     filenames.append(filename)
     plt.close()
+    
+    del J_step               # drop Python reference
+    gc.collect()             # free DeviceArray objects
+    jax.clear_caches()     # tear down compiled executables
 
 tend = time.time()
 print("Total simulation time:", tend - tstart)
