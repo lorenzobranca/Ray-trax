@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 
 
-import jax.numpy as jnp
 
 def gaussian_emissivity(Nx, Ny, Nz=None, center=(0, 0, 0), amplitude=1e3, width=5.0):
     """
@@ -33,3 +32,37 @@ def gaussian_emissivity(Nx, Ny, Nz=None, center=(0, 0, 0), amplitude=1e3, width=
         r2 = (X - x0)**2 + (Y - y0)**2 + (Z - z0)**2
         return amplitude * jnp.exp(-r2 / (2 * width**2))
 
+def process_density_field(kappa, percentile=99.99, amplitude=1e3, width=1.0):
+    """
+    Processes a 3D density field to extract the top percentile regions
+    and creates an emissivity field by injecting Gaussian sources.
+
+    Parameters:
+    - kappa (jnp.ndarray): 3D density field
+    - percentile (float): threshold percentile to define star regions
+    - amplitude (float): peak amplitude of Gaussian emissivity
+    - width (float): width of the Gaussian
+
+    Returns:
+    - emissivity (jnp.ndarray): 3D emissivity field
+    - mask (jnp.ndarray): boolean mask of star regions
+    - star_positions (jnp.ndarray): float32 coordinates of star centers
+    """
+    Nx, Ny, Nz = kappa.shape
+
+    # Compute the mask for high-density regions
+    threshold = jnp.percentile(kappa, percentile)
+    mask = kappa >= threshold
+
+    # Get star positions
+    star_indices = jnp.argwhere(mask)
+    star_positions = star_indices.astype(jnp.float32) + 0.5  # center in the cell
+
+    # Initialize emissivity field
+    emissivity = jnp.zeros_like(kappa)
+
+    # Inject Gaussian sources
+    for pos in star_positions:
+        emissivity += gaussian_emissivity(Nx, Ny, Nz, center=pos, amplitude=amplitude, width=width)
+
+    return emissivity, mask, star_positions

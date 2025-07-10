@@ -60,6 +60,7 @@ def trilinear_op(grid, x, y, z, value=None, mode="interp"):
         for w, (ix, iy, iz) in zip(weights, indices):
             updates = updates.at[ix, iy, iz].add(w * value)
         return grid + updates
+
 @partial(jax.jit, static_argnames=[
     "num_rays", "step_size", "use_sharding", "max_steps", "radiation_velocity", "step_size"
 ])
@@ -94,7 +95,7 @@ def compute_radiation_field_from_source_with_time_step(
             #kappa_val = trilinear_op(kappa_map, x, y, z, mode="interp") #maybe issue, see possible fixing below
             ix = jnp.clip(jnp.floor(x).astype(int), 0, Nx - 1)
             iy = jnp.clip(jnp.floor(y).astype(int), 0, Ny - 1)
-            iz = jnp.clip(jnp.floor(y).astype(int), 0, Nz - 1)
+            iz = jnp.clip(jnp.floor(z).astype(int), 0, Nz - 1)
 
             kappa_val = kappa_map[ix,iy,iz]
 
@@ -145,28 +146,6 @@ def compute_radiation_field_from_source_with_time_step(
     return jnp.sum(J_all, axis=0) * (4 * jnp.pi / num_rays)
 
 
-'''
-def compute_radiation_field_from_multiple_sources_with_time_step(
-    j_map, kappa_map, source_positions,
-    num_rays=1000, step_size=0.5,
-    radiation_velocity=1.0, time_step=1.0,
-    use_sharding=False
-):
-    """
-    Compute the radiation field within one time step from multiple sources.
-    """
-    I_total = jnp.zeros_like(j_map)
-    for source_pos in source_positions:
-        I_total += compute_radiation_field_from_source_with_time_step(
-            j_map, kappa_map, source_pos,
-            num_rays=num_rays,
-            step_size=step_size,
-            radiation_velocity=radiation_velocity,
-            time_step=time_step,
-            use_sharding=use_sharding
-        )
-    return I_total
-'''
 
 def compute_radiation_field_from_multiple_sources_with_time_step(
     j_map, kappa_map, source_positions,

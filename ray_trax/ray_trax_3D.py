@@ -84,7 +84,7 @@ def compute_radiation_field_from_source(
             #kappa_val = trilinear_op(kappa_map, x, y, z, mode="interp") # this have problems, solution here in comment:
             ix = jnp.clip(jnp.floor(x).astype(int), 0, Nx - 1)
             iy = jnp.clip(jnp.floor(y).astype(int), 0, Ny - 1)
-            iz = jnp.clip(jnp.floor(y).astype(int), 0, Nz - 1)
+            iz = jnp.clip(jnp.floor(z).astype(int), 0, Nz - 1)
 
             kappa_val = kappa_map[ix,iy,iz]
 

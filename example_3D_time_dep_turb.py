@@ -10,8 +10,8 @@ from jax import random
 import matplotlib.pyplot as plt
 import imageio
 
-from ray_trax.create_turbulent_3D import generate_correlated_lognormal_field_3D
-from ray_trax.utils import gaussian_emissivity
+#from ray_trax.create_turbulent_3D import generate_correlated_lognormal_field_3D
+from ray_trax.utils import gaussian_emissivity, process_density_field
 from ray_trax.ray_trax_3D_tdep import (
     compute_radiation_field_from_multiple_sources_with_time_step
 )
@@ -20,21 +20,12 @@ from ray_trax.ray_trax_3D_tdep import (
 Nx, Ny, Nz = 128, 128, 128
 key = random.PRNGKey(111)
 
-# Generate absorption field and mask
-kappa, mask = generate_correlated_lognormal_field_3D(
-    key, shape=(Nx, Ny, Nz),
-    mean=1.0, length_scale=0.05,
-    sigma_g=1.2, percentile=99.99
-)
 
-# Get star positions
-star_indices = jnp.argwhere(mask)
-star_positions = star_indices.astype(jnp.float32) + 0.5
+# Load your saved 3D field (replace with your actual load logic)
+kappa = jnp.load("./turbulent_fields/0_s-1.7_rms20p0.npy")
 
-# Create emissivity field
-emissivity = jnp.zeros((Nx, Ny, Nz))
-for pos in star_positions:
-    emissivity += gaussian_emissivity(Nx, Ny, Nz, center=pos, amplitude=1e3, width=1.0)
+# Process it
+emissivity, mask, star_positions = process_density_field(kappa, percentile=99.99)
 
 # Time-stepping parameters
 total_time = 10.0
