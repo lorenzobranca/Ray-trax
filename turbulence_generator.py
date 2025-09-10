@@ -15,7 +15,7 @@
 # RESET PROPERLY
 import os
 # set the correct GPU
-os.environ["CUDA_VISIBLE_DEVICES"] = "6"
+os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 # you may also use
 # # ==== GPU selection ====
 # from autocvd import autocvd

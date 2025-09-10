@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3, 4, 5, 6"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3, 6"
 import gc
 
 import time
@@ -51,10 +51,10 @@ for step in range(int(total_time / dt)):
         use_sharding=True
     )
     
-    for d in jax.devices():
-        print(f"Device {d.id} ({d.device_kind}):")
-        print("  allocated:", d.memory_allocated() / 1024**2, "MiB")
-        print("  peak     :", d.memory_stats()['max_mem_allocated'] / 1024**2, "MiB")
+    #for d in jax.devices():
+    #    print(f"Device {d.id} ({d.device_kind}):")
+    #    print("  allocated:", d.memory_allocated() / 1024**2, "MiB")
+    #    print("  peak     :", d.memory_stats()['max_mem_allocated'] / 1024**2, "MiB")
 
     # Force evaluation and break JAX graph
     J_step.block_until_ready()
