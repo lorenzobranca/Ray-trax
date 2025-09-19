@@ -19,7 +19,7 @@ from ray_trax.ray_trax_3D_tdep import (
 # Config (edit these as needed)
 # ----------------------------
 Nx, Ny, Nz = 128, 128, 128
-key = random.PRNGKey(111)
+key = random.PRNGKey(112)
 
 # Frequency-bin config
 num_bins = 6
@@ -29,7 +29,7 @@ beta = 1.0                    # opacity ~ nu^(-beta); beta>0 => decreasing with 
 nu_ref = None                 # None => use lowest-bin center as reference
 
 # Ray-tracing / time stepping
-total_time = 20.0
+total_time = 30.0
 dt = 1.0
 c = 1.0                       # speed of light in code units
 num_rays = 4096
@@ -50,7 +50,7 @@ if save_per_bin:
 kappa_base = jnp.load("./turbulent_fields/0_s-1.7_rms20p0.npy")
 
 # Build emissivity and source positions from density (your helper)
-emissivity_base, mask, star_positions = process_density_field(kappa_base, percentile=99.99)
+emissivity_base, mask, star_positions = process_density_field(kappa_base, percentile=99.99, amplitude = 1e2)
 
 # ---------------------------
 # Build 6-bin BlackBody shape
