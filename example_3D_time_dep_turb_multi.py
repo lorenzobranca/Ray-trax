@@ -1,6 +1,6 @@
 # main_3D_time_dep_turb_multinu.py
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3, 6"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import gc
 import time
 import numpy as np
@@ -29,7 +29,7 @@ beta = 1.0                    # opacity ~ nu^(-beta); beta>0 => decreasing with 
 nu_ref = None                 # None => use lowest-bin center as reference
 
 # Ray-tracing / time stepping
-total_time = 10.0
+total_time = 20.0
 dt = 1.0
 c = 1.0                       # speed of light in code units
 num_rays = 4096
@@ -88,6 +88,8 @@ print("Opacity scaling ~ (nu/nu_ref)^(-beta) with beta =", beta, "and nu_ref =",
 # ---------------------------------------
 tstart = time.time()
 filenames = []
+
+save_per_bin = True
 
 for step in range(int(total_time / dt)):
     print(f"Time step {step + 1}/{int(total_time / dt)}")

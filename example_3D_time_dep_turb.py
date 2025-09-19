@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3, 6"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2, 5"
 import gc
 
 import time
@@ -24,6 +24,10 @@ key = random.PRNGKey(111)
 # Load your saved 3D field (replace with your actual load logic)
 kappa = jnp.load("./turbulent_fields/0_s-1.7_rms20p0.npy")
 
+plt.imshow(kappa[:,:,64])
+plt.savefig('turb_field.png')
+exit()
+
 # Process it
 emissivity, mask, star_positions = process_density_field(kappa, percentile=99.99)
 
@@ -41,13 +45,15 @@ filenames = []
 for step in range(int(total_time / dt)):
     print(f"Time step {step + 1}/{int(total_time / dt)}")
 
+    
+
 
     J_step = compute_radiation_field_from_multiple_sources_with_time_step(
         emissivity, kappa, star_positions,
-        num_rays=4096,
+        num_rays=int(8*512),#4096,
         step_size=0.5,
         radiation_velocity=c,
-        time_step=dt * step,
+        time_step=dt * (step+1),
         use_sharding=True
     )
     
@@ -59,6 +65,8 @@ for step in range(int(total_time / dt)):
     # Force evaluation and break JAX graph
     J_step.block_until_ready()
     J_step = np.array(J_step)
+
+
 
     # Plot snapshot
     mid_z = Nz // 2
