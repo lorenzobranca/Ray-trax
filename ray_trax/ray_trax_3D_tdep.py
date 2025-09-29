@@ -14,7 +14,7 @@ def sample_sphere(n):
     y = sin_theta * jnp.sin(phi)
     z = cos_theta
     return jnp.stack([x, y, z], axis=1)
-
+'''
 def trilinear_op(grid, x, y, z, value=None, mode="interp"):
     Nx, Ny, Nz = grid.shape
     x0 = jnp.floor(x).astype(int)
@@ -24,7 +24,7 @@ def trilinear_op(grid, x, y, z, value=None, mode="interp"):
     y1 = jnp.clip(y0 + 1, 0, Ny - 1)
     z1 = jnp.clip(z0 + 1, 0, Nz - 1)
     x0 = jnp.clip(x0, 0, Nx - 1)
-    y0 = jnp.clip(y0, 0, Nz - 1)
+    y0 = jnp.clip(y0, 0, Ny - 1)
     z0 = jnp.clip(z0, 0, Nz - 1)
 
     dx = x - x0
@@ -60,6 +60,52 @@ def trilinear_op(grid, x, y, z, value=None, mode="interp"):
         for w, (ix, iy, iz) in zip(weights, indices):
             updates = updates.at[ix, iy, iz].add(w * value)
         return grid + updates
+'''
+
+def trilinear_op(grid, x, y, z, value=None, mode="interp"):
+    Nx, Ny, Nz = grid.shape
+    x0 = jnp.floor(x).astype(jnp.int32)
+    y0 = jnp.floor(y).astype(jnp.int32)
+    z0 = jnp.floor(z).astype(jnp.int32)
+
+    x1 = jnp.clip(x0 + 1, 0, Nx - 1)
+    y1 = jnp.clip(y0 + 1, 0, Ny - 1)
+    z1 = jnp.clip(z0 + 1, 0, Nz - 1)
+    x0 = jnp.clip(x0, 0, Nx - 1)
+    y0 = jnp.clip(y0, 0, Ny - 1)  # <-- fixed
+    z0 = jnp.clip(z0, 0, Nz - 1)
+
+    dx, dy, dz = (x - x0), (y - y0), (z - z0)
+
+    w000 = (1-dx)*(1-dy)*(1-dz); w001 = (1-dx)*(1-dy)*dz
+    w010 = (1-dx)*dy*(1-dz);     w011 = (1-dx)*dy*dz
+    w100 = dx*(1-dy)*(1-dz);     w101 = dx*(1-dy)*dz
+    w110 = dx*dy*(1-dz);         w111 = dx*dy*dz
+
+    if mode == "interp":
+        v000 = grid[x0, y0, z0]; v001 = grid[x0, y0, z1]
+        v010 = grid[x0, y1, z0]; v011 = grid[x0, y1, z1]
+        v100 = grid[x1, y0, z0]; v101 = grid[x1, y0, z1]
+        v110 = grid[x1, y1, z0]; v111 = grid[x1, y1, z1]
+        return (w000*v000 + w001*v001 + w010*v010 + w011*v011 +
+                w100*v100 + w101*v101 + w110*v110 + w111*v111)
+
+    elif mode == "deposit":
+        assert value is not None
+        out = grid
+        out = out.at[x0, y0, z0].add(w000 * value)
+        out = out.at[x0, y0, z1].add(w001 * value)
+        out = out.at[x0, y1, z0].add(w010 * value)
+        out = out.at[x0, y1, z1].add(w011 * value)
+        out = out.at[x1, y0, z0].add(w100 * value)
+        out = out.at[x1, y0, z1].add(w101 * value)
+        out = out.at[x1, y1, z0].add(w110 * value)
+        out = out.at[x1, y1, z1].add(w111 * value)
+        return out
+
+    else:
+        raise ValueError("mode must be 'interp' or 'deposit'")
+
 
 @partial(jax.jit, static_argnames=[
     "num_rays", "step_size", "use_sharding", "max_steps", "radiation_velocity", "step_size"
@@ -122,8 +168,10 @@ def compute_radiation_field_from_source_with_time_step(
             raise ValueError(f"num_rays ({num_rays}) must be divisible by number of devices ({n_devices}).")
 
         mesh_shape = (n_devices,)
-        mesh = jax.sharding.Mesh(np.array(devices).reshape(mesh_shape), axis_names=('x',))
-        sharding = NamedSharding(mesh, P('x', None))  # rays over 'x', each ray is a (3,) vector
+        #mesh = jax.sharding.Mesh(np.array(devices).reshape(mesh_shape), axis_names=('x',))
+        mesh = jax.sharding.Mesh(np.array(jax.devices()), axis_names=('x',))
+        #sharding = NamedSharding(mesh, P('x', None))  # rays over 'x', each ray is a (3,) vector
+        sharding = NamedSharding(mesh, P('x'))
 
         # Reshape and shard directions
         directions_reshaped = directions.reshape((n_devices, -1, 3))
@@ -132,13 +180,17 @@ def compute_radiation_field_from_source_with_time_step(
         # Apply vmap over each shard
         @jax.vmap  # Automatically parallel within each device
         def trace_ray_batch(dir_batch):
-            return jax.vmap(trace_single_ray)(dir_batch)
+            
+            #return jax.vmap(trace_single_ray)(dir_batch)
+            return jnp.sum(jax.vmap(trace_single_ray)(dir_batch), axis=0)
+            #return jax.lax.psum_scatter(jax.vmap(trace_single_ray)(dir_batch), axis_name="x")
 
         with mesh:
             J_all_sharded = trace_ray_batch(directions_sharded)  # [n_devices, rays_per_device, Nx, Ny, Nz]
 
         # Merge all rays
-        J_all = J_all_sharded.reshape((num_rays, *j_map.shape))  # [num_rays, Nx, Ny, Nz]
+        #J_all = J_all_sharded.reshape((num_rays, *j_map.shape))  # [num_rays, Nx, Ny, Nz]
+        J_all = J_all_sharded.reshape((n_devices, *j_map.shape))
 
     else:
         J_all = jax.vmap(trace_single_ray)(directions)

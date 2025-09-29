@@ -1,0 +1,146 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "4"
+
+import time
+import jax
+import jax.numpy as jnp
+import matplotlib.pyplot as plt
+
+from ray_trax.ray_trax_3D_tdep import compute_radiation_field_from_source_with_time_step
+from ray_trax.utils import gaussian_emissivity  # must support 3D: (Nx,Ny,Nz, center, amplitude, width)
+
+# ----------------------- domain & parameters -----------------------
+Nx, Ny, Nz = 64, 64, 64
+kappa0 = 0.1
+L_total = 1.0                      # total luminosity across all sources
+num_sources = 10
+width = 1.5                        # Gaussian width in grid units
+num_rays = 8192
+step_size = 0.5
+c = 1.0
+dt = 50.0
+
+# Absorption field (uniform here)
+kappa = jnp.ones((Nx, Ny, Nz), dtype=jnp.float32) * kappa0
+
+# ----------------------- source placement -------------------------
+# Example: place sources on a small 3D grid around the center (repeatable pattern)
+cx, cy, cz = Nx / 2, Ny / 2, Nz / 2
+offsets = jnp.array([
+    [-8, -8, -8], [ 8, -8, -8], [-8,  8, -8], [ 8,  8, -8],
+    [-8, -8,  8], [ 8, -8,  8], [-8,  8,  8], [ 8,  8,  8],
+    [ 0,  0,  0], [12,  0,  0],
+], dtype=jnp.float32)
+source_positions = jnp.stack([jnp.array([cx, cy, cz], dtype=jnp.float32) + off for off in offsets], axis=0)
+print("source positions: ", source_positions)
+
+assert source_positions.shape == (num_sources, 3)
+
+# Per-source luminosities (equal split here)
+L_i = jnp.ones((num_sources,), dtype=jnp.float32) * (L_total / num_sources)
+
+# ----------------------- emissivity field -------------------------
+# Build a SINGLE emissivity map with 10 Gaussian blobs; each normalized to its L_i
+emissivity = jnp.zeros((Nx, Ny, Nz), dtype=jnp.float32)
+for i in range(num_sources):
+    raw = gaussian_emissivity(Nx, Ny, Nz, center=source_positions[i], amplitude=1., width=width)
+    raw_sum = jnp.sum(raw)
+    # normalize this blob to integrate to L_i
+    blob = raw * (L_i[i] / (raw_sum + 1e-20))
+    emissivity = emissivity + blob
+
+# ----------------------- ray tracing (sum of sources) -------------
+# We your single-source forward once per source and sum.
+# NOTE: compute_radiation_field_from_source_with_time_step already scales rays by 4π/num_rays.
+start = time.time()
+J_sum = jnp.zeros_like(emissivity)
+for i in range(num_sources):
+    J_i = compute_radiation_field_from_source_with_time_step(
+        emissivity,
+        kappa,
+        source_pos=source_positions[i],
+        num_rays=int(num_rays),
+        step_size=float(step_size),
+        radiation_velocity=float(c),
+        time_step=float(dt),
+        use_sharding=False,      # set True if you’ve configured sharding
+    )
+    J_sum = J_sum + J_i
+elapsed = time.time() - start
+print(f"Ray tracing for {num_sources} sources done in {elapsed:.2f} s")
+
+# ----------------------- analytic comparison ----------------------
+# Sum of 10 point-source terms: J(r) = Σ_i [ L_i / (4π r_i^2) * exp(-kappa0 * r_i) ]
+X, Y, Z = jnp.meshgrid(jnp.arange(Nx), jnp.arange(Ny), jnp.arange(Nz), indexing='ij')
+
+def point_source_field(center, Lsrc):
+    dx = X - center[0]; dy = Y - center[1]; dz = Z - center[2]
+    r = jnp.sqrt(dx*dx + dy*dy + dz*dz)
+    return (Lsrc / (4.0 * jnp.pi * (r + 1e-6 )**2)) * jnp.exp(-kappa0 * (r))
+
+J_analytic = jnp.zeros_like(J_sum)
+for i in range(num_sources):
+    J_analytic = J_analytic + point_source_field(source_positions[i], L_i[i])
+
+
+
+ix, iy, iz = int(Nx/2), int(Ny/2), int(Nz/2)
+print("J_analytic[center] =", float(J_analytic[ix, iy, iz]))
+print("J_numeric[center]  =", float(J_sum[ix, iy, iz]))
+
+# source_positions is shape (num_sources, 3), float
+idx = source_positions.astype(int)  # integer indices (num_sources, 3)
+
+# gather the values from J_analytic at those positions
+val = J_sum[idx[:, 0], idx[:, 1], idx[:, 2]]
+
+# scatter them into J_sum
+J_analytic = J_analytic.at[idx[:, 0], idx[:, 1], idx[:, 2]].set(val)
+
+print("J_analytic[center] =", float(J_analytic[ix, iy, iz]))
+print("J_numeric[center]  =", float(J_sum[ix, iy, iz]))
+
+
+# ----------------------- plotting: slices -------------------------
+os.makedirs("plots_3d_multi", exist_ok=True)
+
+def save_slice(plane, index):
+    if plane == "x":
+        num_slice = J_sum[index, 1:-1, 1:-1]
+        an_slice  = J_analytic[index, 1:-1, 1:-1]
+    elif plane == "y":
+        num_slice = J_sum[1:-1, index, 1:-1]
+        an_slice  = J_analytic[1:-1, index, 1:-1]
+    else:
+        num_slice = J_sum[1:-1, 1:-1, index]
+        an_slice  = J_analytic[1:-1, 1:-1, index]
+
+    rel_err = jnp.abs((num_slice - an_slice) / (an_slice + 1e-10))
+    print("rel err:", jnp.mean(rel_err[1:-1, 1:-1]))
+
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 3, 1); plt.imshow(jnp.log10(num_slice + 1e-10), origin='lower', cmap='inferno'); plt.title(f"Numeric log10(J), {plane}-slice"); plt.colorbar()
+    plt.subplot(1, 3, 2); plt.imshow(jnp.log10(an_slice  + 1e-10), origin='lower', cmap='inferno'); plt.title(f"Analytic log10(J), {plane}-slice"); plt.colorbar()
+    plt.subplot(1, 3, 3); plt.imshow(jnp.log10(rel_err + 1e-10), origin='lower', cmap='magma');  plt.title("Relative error log10(|Δ|/J_an)");  plt.colorbar()
+    plt.tight_layout()
+    plt.savefig(f"plots_3d_multi/slice_{plane}.png"); plt.close()
+
+
+save_slice("x", ix)
+save_slice("y", iy)
+save_slice("z", iz)
+
+# ----------------------- optional: a radial line -------------------
+# choose one source and plot along a line passing through it
+j = 0
+sx, sy, sz = map(int, map(float, source_positions[j]))
+r_line = jnp.sqrt((X[sx, :-1, sz] - source_positions[j,0])**2 + (Y[sx, :-1, sz] - source_positions[j,1])**2)
+J_num_line = J_sum[sx, :-1, sz]
+J_an_line  = J_analytic[sx, :-1, sz]
+
+plt.figure(figsize=(6, 4))
+plt.plot(r_line, J_num_line, label="Numeric")
+plt.plot(r_line, J_an_line, label="Analytic", linestyle="--")
+plt.yscale('log'); plt.xlabel("Radius r"); plt.ylabel("Intensity J(r)"); plt.legend()
+plt.tight_layout(); plt.savefig("plots_3d_multi/radial_profile_line.png"); plt.close()
+

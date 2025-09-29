@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2, 5"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import gc
 
 import time
@@ -26,7 +26,7 @@ kappa = jnp.load("./turbulent_fields/0_s-1.7_rms20p0.npy")
 
 plt.imshow(kappa[:,:,64])
 plt.savefig('turb_field.png')
-exit()
+
 
 # Process it
 emissivity, mask, star_positions = process_density_field(kappa, percentile=99.99)

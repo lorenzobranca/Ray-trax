@@ -1,6 +1,6 @@
 # main_3D_time_dep_turb_multinu.py
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "4"
 import gc
 import time
 import numpy as np
@@ -29,7 +29,7 @@ beta = 1.0                    # opacity ~ nu^(-beta); beta>0 => decreasing with 
 nu_ref = None                 # None => use lowest-bin center as reference
 
 # Ray-tracing / time stepping
-total_time = 30.0
+total_time = 60.0
 dt = 1.0
 c = 1.0                       # speed of light in code units
 num_rays = 4096
