@@ -25,7 +25,7 @@ key = random.PRNGKey(112)
 num_bins = 6
 nu_min, nu_max = 1e-2, 1e+2   # arbitrary code units (relative only)
 T_bb = 1.0                    # "temperature" in code units (only relative matters)
-beta = 1.0                    # opacity ~ nu^(-beta); beta>0 => decreasing with frequency
+beta = .5                    # opacity ~ nu^(-beta); beta>0 => decreasing with frequency
 nu_ref = None                 # None => use lowest-bin center as reference
 
 # Ray-tracing / time stepping
@@ -102,6 +102,7 @@ for step in range(int(total_time / dt)):
         # Per-bin emissivity and absorption
         emissivity_b = emissivity_base * weights[b]
         kappa_b = kappa_base * ((nu_centers[b] / nu_ref) ** (-beta))
+        print(((nu_centers[b] / nu_ref) ** (-beta)))
 
         # Compute radiation field for this bin at this time
         J_b = compute_radiation_field_from_multiple_sources_with_time_step(
@@ -119,6 +120,7 @@ for step in range(int(total_time / dt)):
 
         if J_total is None:
             J_total = J_b_np.copy()
+            
         else:
             J_total += J_b_np
 
@@ -129,7 +131,7 @@ for step in range(int(total_time / dt)):
         del J_b, J_b_np
         gc.collect()
         jax.clear_caches()
-
+    
     # ---- Plot combined snapshot ----
     mid_z = Nz // 2
     plt.figure(figsize=(6, 5))
