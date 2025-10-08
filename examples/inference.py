@@ -161,13 +161,17 @@ def plot_loss_landscape(
     check_linearity=True
 ):
     """
-    Plot L(A) and dL/dA for the current setup; uses K=forward_J(e0) for speed.
+    Plot L(A) and dL/dA with clear, color-coded styling.
+    Uses precomputed K = forward_J(e0) from the outer scope (for speed).
     """
+
+    # --- optional linearity check (K is assumed precomputed globally) ---
     if check_linearity:
-        K2 = forward_J(2*e0, kappa=kappa, source_pos=source_pos)
-        lin_err = float(jnp.linalg.norm(K2 - 2*K) / (jnp.linalg.norm(K) + 1e-12))
+        K2 = forward_J(2 * e0, kappa=kappa, source_pos=source_pos)
+        lin_err = float(jnp.linalg.norm(K2 - 2 * K) / (jnp.linalg.norm(K) + 1e-12))
         print(f"[loss landscape] linearity err: {lin_err:.2e}")
 
+    # --- loss/grad definitions ---
     if loss_type == "mse":
         def L(A):
             diff = (A * K - J_ref)
@@ -184,37 +188,81 @@ def plot_loss_landscape(
             return 2.0 * jnp.sum(w * K * (A * K - J_ref)) / mask_sum
         A_star = float(jnp.sum(w * K * J_ref) / (jnp.sum(w * K * K) + 1e-12))
 
-    A_grid = jnp.linspace(A_min, A_max, n)
-    L_vals  = jax.vmap(L)(A_grid)
-    dL_vals = jax.vmap(dL)(A_grid)
+    # --- sample grid and evaluate ---
+    A_grid   = jnp.linspace(A_min, A_max, n)
+    L_vals   = jax.vmap(L)(A_grid)
+    dL_vals  = jax.vmap(dL)(A_grid)
 
-    i_min = int(jnp.argmin(L_vals))
-    A_argmin = float(A_grid[i_min]); L_min = float(L_vals[i_min])
+    i_min     = int(jnp.argmin(L_vals))
+    A_argmin  = float(A_grid[i_min])
+    L_min     = float(L_vals[i_min])
+    L_at_true = float(L(float(mark_true))) if mark_true is not None else None
 
-    fig, ax1 = plt.subplots(figsize=(7, 4.5))
-    ax1.plot(np.asarray(A_grid), np.asarray(L_vals), label="L(A)")
-    ax1.set_xlabel("Amplitude A"); ax1.set_ylabel("Loss")
-    ax1.grid(True, alpha=0.3)
-    ax1.axvline(A_argmin, linestyle="--", alpha=0.7, label=f"argmin ≈ {A_argmin:.4f}")
-    ax1.axvline(A_star,   linestyle=":",  alpha=0.8, label=f"A* (closed form) ≈ {A_star:.4f}")
+    # --- formatting helpers ---
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import MaxNLocator, ScalarFormatter
+
+    # Colorblind-friendly Tableau palette
+    colors = {
+        "loss":   "#1f77b4",  # blue
+        "grad":   "#d62728",  # red
+        "argmin": "#2ca02c",  # green
+        "astar":  "#9467bd",  # purple
+        "true":   "#ff7f0e",  # orange
+    }
+
+    fig, ax1 = plt.subplots(figsize=(7.2, 4.4))
+
+    # L(A)
+    ax1.plot(np.asarray(A_grid), np.asarray(L_vals),
+             color=colors["loss"], lw=2.2, label=r"Loss $L(A)$")
+    ax1.set_xlabel(r"Amplitude $A$")
+    ax1.set_ylabel(r"Loss $L$", color=colors["loss"])
+    ax1.tick_params(axis='y', colors=colors["loss"])
+    ax1.yaxis.set_major_locator(MaxNLocator(nbins=5))
+    ax1.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    ax1.grid(True, which="major", alpha=0.35)
+    ax1.minorticks_on()
+    ax1.grid(True, which="minor", alpha=0.15)
+    ax1.margins(x=0)
+
+    # Vertical markers (argmin, A*, A_true)
+    ax1.axvline(A_argmin, color=colors["argmin"], linestyle="--", lw=1.8,
+                label=fr"$\arg\min L \approx {A_argmin:.4f}$")
+    ax1.axvline(A_star, color=colors["astar"], linestyle=":", lw=2.0,
+                label=fr"$A^\star \approx {A_star:.4f}$")
     if mark_true is not None:
-        ax1.axvline(float(mark_true), alpha=0.6, label=f"A_true = {float(mark_true):.4f}")
+        ax1.axvline(float(mark_true), color=colors["true"], linestyle="-.", lw=1.6,
+                    label=fr"$A_\mathrm{{true}} = {float(mark_true):.4f}$")
+        if L_at_true is not None and np.isfinite(L_at_true):
+            ax1.plot([float(mark_true)], [L_at_true], marker="o", ms=4,
+                     color=colors["true"])
 
+    # dL/dA on twin axis
     ax2 = ax1.twinx()
-    ax2.plot(np.asarray(A_grid), np.asarray(dL_vals), alpha=0.85, label="dL/dA")
-    ax2.set_ylabel("dL/dA")
+    ax2.plot(np.asarray(A_grid), np.asarray(dL_vals),
+             color=colors["grad"], lw=1.9, alpha=0.95,
+             label=r"$\mathrm{d}L/\mathrm{d}A$")
+    ax2.set_ylabel(r"$\mathrm{d}L/\mathrm{d}A$", color=colors["grad"])
+    ax2.tick_params(axis='y', colors=colors["grad"])
+    ax2.axhline(0.0, lw=1.0, color=colors["grad"], alpha=0.35)
 
-    lines, labels = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines + lines2, labels + labels2, loc="best")
+    # Combined legend
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    leg = ax1.legend(h1 + h2, l1 + l2, loc="upper right", frameon=True, fontsize=9)
+    leg.get_frame().set_alpha(0.9)
+
+    # Nice title (optional): indicate loss type
+    ax1.set_title(f"Loss landscape vs A  —  type: {loss_type.upper()}")
 
     plt.tight_layout()
-    plt.savefig(savepath, dpi=160)
+    plt.savefig(savepath, dpi=220, bbox_inches="tight")
     plt.close()
+
     print(f"[loss landscape] saved -> {savepath}")
     print(f"[loss landscape] argmin ~ {A_argmin:.6f}, loss ~ {L_min:.3e}")
-    print(f"[loss landscape] A* (same loss) ~ {A_star:.6f}")
+    print(f"[loss landscape] A* (closed form) ~ {A_star:.6f}")
 
-# create the plot (optional)
-plot_loss_landscape()
 
