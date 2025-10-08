@@ -200,11 +200,6 @@ grad_A = jax.grad(mse_loss)(1.0, j_map, kappa, src, J_ref,
 
 ## Testing
 
-Run the full test suite (unit + integration + gradient checks):
-
-```bash
-pytest -q
-```
 
 What’s covered (typical set):
 - **Sampling:** Fibonacci/golden-angle directions (shape & coverage invariants).
