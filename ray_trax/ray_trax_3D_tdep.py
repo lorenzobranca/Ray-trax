@@ -156,7 +156,7 @@ def compute_radiation_field_from_source_with_time_step(
             return (x_new, y_new, z_new, I_new, tau_new, J)
 
         state_init = (x, y, z, I, tau, J)
-        final_state = jax.lax.fori_loop(0, max_steps, body_fn, state_init)
+        final_state = jax.lax.fori_loop(0, max_steps, body_fn, state_init, unroll = True)
         return final_state[-1]  # Return J
 
     if use_sharding:
