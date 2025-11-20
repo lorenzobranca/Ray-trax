@@ -66,3 +66,61 @@ def process_density_field(kappa, percentile=99.99, amplitude=1e3, width=1.0):
         emissivity += gaussian_emissivity(Nx, Ny, Nz, center=pos, amplitude=amplitude, width=width)
 
     return emissivity, mask, star_positions
+
+
+def sample_sphere(n):
+    i = jnp.arange(0, n)
+    golden_ratio = (1 + jnp.sqrt(5)) / 2
+    phi = 2 * jnp.pi * i / golden_ratio
+    cos_theta = 1 - 2 * (i + 0.5) / n
+    sin_theta = jnp.sqrt(1 - cos_theta**2)
+    x = sin_theta * jnp.cos(phi)
+    y = sin_theta * jnp.sin(phi)
+    z = cos_theta
+    return jnp.stack([x, y, z], axis=1)
+
+
+def trilinear_op(grid, x, y, z, value=None, mode="interp"):
+    Nx, Ny, Nz = grid.shape
+    x0 = jnp.floor(x).astype(jnp.int32)
+    y0 = jnp.floor(y).astype(jnp.int32)
+    z0 = jnp.floor(z).astype(jnp.int32)
+
+    x1 = jnp.clip(x0 + 1, 0, Nx - 1)
+    y1 = jnp.clip(y0 + 1, 0, Ny - 1)
+    z1 = jnp.clip(z0 + 1, 0, Nz - 1)
+    x0 = jnp.clip(x0, 0, Nx - 1)
+    y0 = jnp.clip(y0, 0, Ny - 1)  # <-- fixed
+    z0 = jnp.clip(z0, 0, Nz - 1)
+
+    dx, dy, dz = (x - x0), (y - y0), (z - z0)
+
+    w000 = (1-dx)*(1-dy)*(1-dz); w001 = (1-dx)*(1-dy)*dz
+    w010 = (1-dx)*dy*(1-dz);     w011 = (1-dx)*dy*dz
+    w100 = dx*(1-dy)*(1-dz);     w101 = dx*(1-dy)*dz
+    w110 = dx*dy*(1-dz);         w111 = dx*dy*dz
+
+    if mode == "interp":
+        v000 = grid[x0, y0, z0]; v001 = grid[x0, y0, z1]
+        v010 = grid[x0, y1, z0]; v011 = grid[x0, y1, z1]
+        v100 = grid[x1, y0, z0]; v101 = grid[x1, y0, z1]
+        v110 = grid[x1, y1, z0]; v111 = grid[x1, y1, z1]
+        return (w000*v000 + w001*v001 + w010*v010 + w011*v011 +
+                w100*v100 + w101*v101 + w110*v110 + w111*v111)
+
+    elif mode == "deposit":
+        assert value is not None
+        out = grid
+        out = out.at[x0, y0, z0].add(w000 * value)
+        out = out.at[x0, y0, z1].add(w001 * value)
+        out = out.at[x0, y1, z0].add(w010 * value)
+        out = out.at[x0, y1, z1].add(w011 * value)
+        out = out.at[x1, y0, z0].add(w100 * value)
+        out = out.at[x1, y0, z1].add(w101 * value)
+        out = out.at[x1, y1, z0].add(w110 * value)
+        out = out.at[x1, y1, z1].add(w111 * value)
+        return out
+
+    else:
+        raise ValueError("mode must be 'interp' or 'deposit'")
+
