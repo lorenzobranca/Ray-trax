@@ -6,7 +6,6 @@
 
 **Ray-trax** is a GPU-oriented, fully differentiable **3D** ray tracer in JAX for the **time-dependent** emission–absorption equation on regular grids. It’s designed for on-the-fly radiative transfer in turbulent astrophysical flows, with clean vectorization across rays, sources, and frequency bins.
 
-> Place `logo_ray-trax.jpeg` next to this `README.md` so the logo renders.
 
 ---
 
