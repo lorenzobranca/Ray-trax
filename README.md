@@ -31,6 +31,7 @@ Each time step advances rays over a horizon \(c\,\Delta t\) using a semi-analyti
 ## Features
 
 - **Time-dependent, 3D** ray marching; multi-source and multi-bin ready.  
+- **Multi-frequency & multi-species** opacities (HI/HeI/HeII photoionization) via a differentiable `kappa` map — enables field-level inverse problems.  
 - **Nearly uniform** directional sampling on \(\mathbb{S}^2\) (Fibonacci lattice).  
 - **Vectorization** over rays/sources/bins; optional **multi-GPU sharding**.  
 - **Differentiable** end-to-end (reverse-mode with static loops; forward-mode for dynamic horizons).  
@@ -159,6 +160,64 @@ Notes:
 - If `max_steps=None`, we use \(N_s=\lceil c\,\Delta t/\Delta s\rceil\) (static in practice).  
 - `source_pos` / `source_positions` accept float grid coords.  
 - Encode “point sources” as spikes in `j_map` or supply explicit positions.
+
+---
+
+## Multi-frequency & multi-species opacities
+
+For spectral transport, `ray_trax_3D_multifreq.py` extends the solver with a trailing
+frequency axis: `j_map`, `kappa_map`, and the output `J` all have shape
+\((N_x,N_y,N_z,n_\text{freq})\). Frequency bins are transported **independently**
+(no scattering between bins); inside each ray step the intensity and optical depth are
+\((n_\text{freq},)\) vectors updated elementwise, so bins act as a batch axis at
+essentially no extra branching cost.
+
+Opacities are built from **photoionization cross sections** (`cross_sections.py`) for
+**HI, HeI, HeII**, each with its own ionization threshold:
+
+| species | threshold | \(\sigma\) at threshold | shape |
+|---|---|---|---|
+| HI   | 13.598 eV | \(6.30\times10^{-18}\,\mathrm{cm^2}\) | \(\propto\nu^{-3}\) |
+| HeI  | 24.587 eV | \(7.42\times10^{-18}\,\mathrm{cm^2}\) | two-power-law (Abel+97) |
+| HeII | 54.418 eV | \(1.58\times10^{-18}\,\mathrm{cm^2}\) | hydrogenic, \(Z=2\) |
+
+`build_kappa_map` assembles the frequency-resolved opacity from the species densities:
+\[
+\kappa_\nu(\mathbf{x}) = n_\mathrm{HI}\,\sigma_\mathrm{HI}(\nu)
+                        + n_\mathrm{HeI}\,\sigma_\mathrm{HeI}(\nu)
+                        + n_\mathrm{HeII}\,\sigma_\mathrm{HeII}(\nu).
+\]
+
+```python
+import numpy as np, jax.numpy as jnp
+from ray_trax.ray_trax_3D_multifreq import compute_radiation_field_multifreq
+from ray_trax.cross_sections import build_kappa_map, NU_HI
+
+Nx = Ny = Nz = 64
+n_freq  = 6
+nu_bins = jnp.array(np.geomspace(NU_HI, 5*NU_HI, n_freq))   # spans HI, HeI, HeII edges
+
+n_HI   = jnp.ones((Nx, Ny, Nz))
+zeros  = jnp.zeros((Nx, Ny, Nz))
+kappa  = build_kappa_map(nu_bins, n_HI, zeros, zeros)       # (Nx,Ny,Nz,n_freq)
+
+j_map  = jnp.zeros((Nx, Ny, Nz, n_freq)).at[Nx//2, Ny//2, Nz//2, :].set(1.0)
+src    = jnp.array([Nx//2, Ny//2, Nz//2], dtype=jnp.float32)
+
+J = compute_radiation_field_multifreq(
+        j_map, kappa, src,
+        num_rays=8000, step_size=0.5, max_steps=320,
+        kappa_interp="trilinear",   # differentiable w.r.t. kappa/n_HI ("nearest" for production)
+    )                                # -> J : (Nx, Ny, Nz, n_freq)
+```
+
+Because the forward map is differentiable w.r.t. the species densities, the
+multi-frequency field enables **field-level inverse problems**: recovering
+\(n_\mathrm{HI}\) — or jointly \(n_\mathrm{HI}, n_\mathrm{HeI}, n_\mathrm{HeII}\) — from an
+observed \(J(\mathbf{x},\nu)\). The differing thresholds and spectral slopes make the
+frequency axis informative enough to **disentangle the three species**
+(see `inference_field_multispecies.py`; `inference_field*.py` for the single-species and
+background-illumination variants).
 
 ---
 

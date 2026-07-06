@@ -172,7 +172,155 @@ def save_slices():
         plt.subplot(1, 2, 2); plt.imshow(ang, origin='lower', cmap='magma'); plt.title("Angle error (deg)"); plt.colorbar()
         plt.tight_layout(); plt.savefig(os.path.join(outdir, f"direction_metrics_{plane}.png")); plt.close()
 
+# ---------- Direction plotting utilities ----------
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+
+def _slice2d(arr3d, plane, idx):
+    """Return a 2D slice from a 3D array with 'ij' indexing."""
+    if plane == 'x':
+        return arr3d[idx, :, :]
+    elif plane == 'y':
+        return arr3d[:, idx, :]
+    elif plane == 'z':
+        return arr3d[:, :, idx]
+    else:
+        raise ValueError("plane must be 'x', 'y', or 'z'.")
+
+def _slice2d_vec(arr4d, plane, idx, comp):
+    """Return a 2D slice from a 4D vector field (Nx,Ny,Nz,3)."""
+    return _slice2d(arr4d[..., comp], plane, idx)
+
+def plot_direction_components_triptych(
+    dir_num, dir_an, plane, idx, outdir, fname="direction_components.png"
+):
+    """
+    3x3 figure like intensity: rows = (x,y,z), cols = (numeric, analytic, |diff|).
+    Components are in [-1,1]; diffs in [0,1].
+    """
+    os.makedirs(outdir, exist_ok=True)
+    comps = ['x', 'y', 'z']
+    fig, axes = plt.subplots(3, 3, figsize=(12, 11), constrained_layout=True)
+
+    # Fixed color ranges for clarity
+    vmin_c, vmax_c = -1.0, 1.0
+    vmin_d, vmax_d = 0.0, 1.0
+
+    im_cbars = [None, None, None]  # to share column colorbars
+
+    for r, comp in enumerate(comps):
+        c = {'x':0, 'y':1, 'z':2}[comp]
+
+        num = np.asarray(_slice2d_vec(dir_num, plane, idx, c))
+        ana = np.asarray(_slice2d_vec(dir_an, plane, idx, c))
+        diff = np.abs(num - ana)
+
+        # Numeric
+        im0 = axes[r, 0].imshow(num, origin='lower', cmap='coolwarm',
+                                vmin=vmin_c, vmax=vmax_c)
+        axes[r, 0].set_title(f"{comp}-component (numeric)")
+        axes[r, 0].set_xticks([]); axes[r, 0].set_yticks([])
+        if im_cbars[0] is None:
+            im_cbars[0] = im0
+
+        # Analytic
+        im1 = axes[r, 1].imshow(ana, origin='lower', cmap='coolwarm',
+                                vmin=vmin_c, vmax=vmax_c)
+        axes[r, 1].set_title(f"{comp}-component (analytic)")
+        axes[r, 1].set_xticks([]); axes[r, 1].set_yticks([])
+        if im_cbars[1] is None:
+            im_cbars[1] = im1
+
+        # |diff|
+        im2 = axes[r, 2].imshow(diff, origin='lower', cmap='magma',
+                                vmin=vmin_d, vmax=vmax_d)
+        axes[r, 2].set_title(f"{comp}-component |diff|")
+        axes[r, 2].set_xticks([]); axes[r, 2].set_yticks([])
+        if im_cbars[2] is None:
+            im_cbars[2] = im2
+
+    # One colorbar per column
+    for col, im in enumerate(im_cbars):
+        cax = fig.add_axes([0.92, 0.70 - 0.31*col, 0.015, 0.25])  # right-side bars
+        fig.colorbar(im, cax=cax)
+
+    fig.suptitle(f"Direction components — plane {plane}, slice {idx}", y=0.98)
+    path = os.path.join(outdir, fname)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+def plot_direction_metrics(
+    dir_num, dir_an, J_num=None, min_J=None,
+    plane='z', idx=0, outdir='.', fname='direction_metrics.png', eps=1e-10
+):
+    """
+    1x2 figure: cosine similarity (0..1) and angle error (deg).
+    Optionally masks low-intensity pixels via J_num < min_J.
+    """
+    os.makedirs(outdir, exist_ok=True)
+
+    # Cosine similarity & angle error
+    dot = np.sum(np.asarray(dir_num) * np.asarray(dir_an), axis=-1)
+    dot = np.clip(dot, -1.0, 1.0)
+    cos_sim = dot
+    ang_err = np.degrees(np.arccos(cos_sim + 0.0))
+
+    if (J_num is not None) and (min_J is not None):
+        mask = (np.asarray(J_num) < float(min_J))
+        cos_sim = np.where(mask, np.nan, cos_sim)
+        ang_err = np.where(mask, np.nan, ang_err)
+
+    cs2d  = _slice2d(cos_sim, plane, idx)
+    ang2d = _slice2d(ang_err, plane, idx)
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
+    im0 = axes[0].imshow(cs2d, origin='lower', vmin=0.0, vmax=1.0, cmap='viridis')
+    axes[0].set_title("Cosine similarity")
+    axes[0].set_xticks([]); axes[0].set_yticks([])
+    fig.colorbar(im0, ax=axes[0])
+
+    # Pick a robust upper bound for angles: 99th percentile (cap at 60 deg to keep scale readable)
+    finite_ang = ang2d[np.isfinite(ang2d)]
+    if finite_ang.size:
+        vmax_ang = float(np.minimum(60.0, np.percentile(finite_ang, 99)))
+    else:
+        vmax_ang = 30.0
+
+    im1 = axes[1].imshow(ang2d, origin='lower', cmap='magma', vmin=0.0, vmax=vmax_ang)
+    axes[1].set_title("Angle error (deg)")
+    axes[1].set_xticks([]); axes[1].set_yticks([])
+    fig.colorbar(im1, ax=axes[1])
+
+    fig.suptitle(f"Direction metrics — plane {plane}, slice {idx}", y=1.02)
+    path = os.path.join(outdir, fname)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+def save_dir_plots(dir_num, dir_an, J_num=None, min_J=None, outdir='.', eps=1e-10):
+    """
+    Save direction visuals for central x/y/z slices:
+      - 3x3 component triptychs (numeric | analytic | |diff|)
+      - 1x2 metrics (cosine similarity | angle error)
+    """
+    Nx, Ny, Nz, _ = dir_num.shape
+    centers = {'x': Nx//2, 'y': Ny//2, 'z': Nz//2}
+
+    for plane, idx in centers.items():
+        plot_direction_components_triptych(
+            dir_num, dir_an, plane, idx, outdir,
+            fname=f"direction_components_{plane}.png"
+        )
+        plot_direction_metrics(
+            dir_num, dir_an, J_num=J_num, min_J=min_J,
+            plane=plane, idx=idx, outdir=outdir,
+            fname=f"direction_metrics_{plane}.png", eps=eps
+        )
 save_slices()
+min_J_for_metrics = np.percentile(np.asarray(J_total), 60)
+save_dir_plots(dir_total, dir_an, J_num=J_total, min_J=min_J_for_metrics, outdir=outdir)
 
 print(f"Saved figures to: {outdir}")
 

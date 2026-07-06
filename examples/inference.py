@@ -1,6 +1,6 @@
 # inference.py — cleaned
 import os, time
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "3")
 
 import jax
 import jax.numpy as jnp
@@ -251,11 +251,11 @@ def plot_loss_landscape(
     # Combined legend
     h1, l1 = ax1.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()
-    leg = ax1.legend(h1 + h2, l1 + l2, loc="upper right", frameon=True, fontsize=9)
+    leg = ax1.legend(h1 + h2, l1 + l2, loc="center right", frameon=True, fontsize=9)
     leg.get_frame().set_alpha(0.9)
 
     # Nice title (optional): indicate loss type
-    ax1.set_title(f"Loss landscape vs A  —  type: {loss_type.upper()}")
+    ax1.set_title(f"Loss landscape vs A  —  Loss type: {loss_type.upper()}")
 
     plt.tight_layout()
     plt.savefig(savepath, dpi=220, bbox_inches="tight")
@@ -265,4 +265,4 @@ def plot_loss_landscape(
     print(f"[loss landscape] argmin ~ {A_argmin:.6f}, loss ~ {L_min:.3e}")
     print(f"[loss landscape] A* (closed form) ~ {A_star:.6f}")
 
-
+plot_loss_landscape()

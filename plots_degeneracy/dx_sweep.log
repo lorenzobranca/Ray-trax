@@ -1,0 +1,14 @@
+mode=dx rays=3000 kfields=4 grid=(64, 64, 64) sources=8 freqs=6
+[dx1e+15] dJ_rel=9.590e-02 (min 7.58e-02) | ratio=0.078 | dead_frac=0.973 | tau_box=[0.00323, 0.403] | 29.0s
+[dx3e+15] dJ_rel=1.405e-01 (min 1.17e-01) | ratio=0.114 | dead_frac=0.979 | tau_box=[0.00968, 1.21] | 16.1s
+[dx1e+16] dJ_rel=1.543e-01 (min 1.33e-01) | ratio=0.125 | dead_frac=0.984 | tau_box=[0.0323, 4.03] | 16.1s
+[dx3e+16] dJ_rel=2.191e-01 (min 1.81e-01) | ratio=0.177 | dead_frac=0.989 | tau_box=[0.0968, 12.1] | 16.1s
+[dx1e+17] dJ_rel=3.392e-01 (min 2.51e-01) | ratio=0.275 | dead_frac=0.994 | tau_box=[0.323, 40.3] | 16.1s
+  appended 5 row(s) -> plots_degeneracy/results.jsonl
+
+Summary (this run):
+                   dx1e+17 | dJ_rel=3.392e-01 | ratio= 0.275 | dead=0.994 | tau_box=[0.323,40.3]
+                   dx3e+16 | dJ_rel=2.191e-01 | ratio= 0.177 | dead=0.989 | tau_box=[0.0968,12.1]
+                   dx1e+16 | dJ_rel=1.543e-01 | ratio= 0.125 | dead=0.984 | tau_box=[0.0323,4.03]
+                   dx3e+15 | dJ_rel=1.405e-01 | ratio= 0.114 | dead=0.979 | tau_box=[0.00968,1.21]
+                   dx1e+15 | dJ_rel=9.590e-02 | ratio= 0.078 | dead=0.973 | tau_box=[0.00323,0.403]

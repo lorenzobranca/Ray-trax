@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 from functools import partial
 from jax.sharding import NamedSharding, PartitionSpec as P
+from jax.experimental.shard_map import shard_map
 
 def sample_sphere(n):
     i = jnp.arange(0, n)
@@ -112,7 +113,13 @@ def compute_radiation_field_from_source_with_time_step(
             I_new = I * jnp.exp(-d_tau) + dI
             tau_new = tau + d_tau
 
-            J = trilinear_op(J, x, y, z, value=I_new, mode="deposit")
+            # Only deposit while the ray is inside the domain; clipping in
+            # trilinear_op otherwise dumps every out-of-box step onto the
+            # nearest boundary voxel, creating spurious bright faces.
+            inside = ((x >= 0) & (x < Nx) &
+                      (y >= 0) & (y < Ny) &
+                      (z >= 0) & (z < Nz)).astype(j_map.dtype)
+            J = trilinear_op(J, x, y, z, value=I_new * inside, mode="deposit")
 
             x_new = x + direction[0] * step_size
             y_new = y + direction[1] * step_size
@@ -158,64 +165,57 @@ def compute_radiation_field_from_source_with_time_step(
         return J_sum * (4.0 * jnp.pi / num_rays)
 
     # ---------------------------
-    # Sharded micro-batch (Mesh)
+    # Sharded micro-batch (shard_map)
     # ---------------------------
-    devices = jax.devices()
-    n_devices = len(devices)
+    n_devices = len(jax.devices())
     if num_rays % n_devices != 0:
         raise ValueError(
-            f"num_rays ({num_rays}) must be divisible by number of devices ({n_devices}) "
+            f"num_rays ({num_rays}) must be divisible by n_devices ({n_devices}) "
             f"when use_sharding=True."
         )
     rays_per_device = num_rays // n_devices
-
-    # Split directions per device using static-size slices
-    dir_chunks = [
-        jax.lax.dynamic_slice_in_dim(directions, i * rays_per_device, rays_per_device, axis=0)
-        for i in range(n_devices)
-    ]
-    directions_reshaped = jnp.stack(dir_chunks, axis=0)  # (n_devices, rays_per_device, 3)
-
     mesh = jax.sharding.Mesh(np.array(jax.devices()), axis_names=('x',))
-    sharding = NamedSharding(mesh, P('x'))
-    directions_sharded = jax.device_put(directions_reshaped, sharding)
 
-    # Per-device reduction with micro-batching (static sizes)
+    # Determine per-device micro-batch size (Python-level, all values are static)
     if (ray_batch_size is None) or (ray_batch_size >= rays_per_device):
         per_dev_batch = rays_per_device
     else:
-        if rays_per_device % ray_batch_size == 0:
-            per_dev_batch = int(ray_batch_size)
-        else:
-            # allow a remainder on each device, handled explicitly
-            per_dev_batch = int(ray_batch_size)
+        per_dev_batch = int(ray_batch_size)
 
-    def reduce_device(dir_dev):
-        # dir_dev: (rays_per_device, 3)
+    # Each device receives (rays_per_device, 3) and returns a partial J.
+    # psum all-reduces across devices so every device holds the full sum.
+    # j_map / kappa_map are closed over and replicated automatically.
+    def per_device_sum(dir_chunk):
         if per_dev_batch == rays_per_device:
-            return sum_ray_batch(dir_dev)
+            J_local = sum_ray_batch(dir_chunk)
         else:
-            nb  = rays_per_device // per_dev_batch     # static
-            rem = rays_per_device %  per_dev_batch     # static
+            nb  = rays_per_device // per_dev_batch
+            rem = rays_per_device %  per_dev_batch
             J_acc = jnp.zeros_like(j_map)
 
-            def body_full(j, acc):
-                start = j * per_dev_batch
-                db = jax.lax.dynamic_slice_in_dim(dir_dev, start, per_dev_batch, axis=0)
+            def body_full(i, acc):
+                start = i * per_dev_batch
+                db = jax.lax.dynamic_slice_in_dim(dir_chunk, start, per_dev_batch, axis=0)
                 return acc + sum_ray_batch(db)
             J_acc = jax.lax.fori_loop(0, nb, body_full, J_acc)
 
             if rem:
-                start_tail = nb * per_dev_batch
-                db_tail = jax.lax.dynamic_slice_in_dim(dir_dev, start_tail, rem, axis=0)
+                db_tail = jax.lax.dynamic_slice_in_dim(
+                    dir_chunk, nb * per_dev_batch, rem, axis=0
+                )
                 J_acc = J_acc + sum_ray_batch(db_tail)
+            J_local = J_acc
 
-            return J_acc
+        return jax.lax.psum(J_local, axis_name='x')
 
-    with mesh:
-        J_per_device = jax.vmap(reduce_device, in_axes=0)(directions_sharded)  # (n_devices, Nx,Ny,Nz)
+    J_sum = shard_map(
+        per_device_sum,
+        mesh=mesh,
+        in_specs=(P('x', None),),   # directions sharded along ray axis
+        out_specs=P(),               # output replicated after psum
+        check_rep=False,             # closed-over arrays are implicitly replicated
+    )(directions)
 
-    J_sum = jnp.sum(J_per_device, axis=0)
     return J_sum * (4.0 * jnp.pi / num_rays)
 
 

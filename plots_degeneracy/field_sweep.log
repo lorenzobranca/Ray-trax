@@ -1,0 +1,22 @@
+mode=field rays=3000 kfields=4 grid=(64, 64, 64) sources=8 freqs=6
+[sg0.8_ls0.05_dx3e+16] dJ_rel=2.115e-01 (min 1.55e-01) | ratio=0.218 | dead_frac=0.989 | tau_box=[0.0968, 12.1] | 30.9s
+[sg0.8_ls0.1_dx3e+16] dJ_rel=1.593e-01 (min 1.25e-01) | ratio=0.164 | dead_frac=0.989 | tau_box=[0.0968, 12.1] | 16.1s
+[sg0.8_ls0.2_dx3e+16] dJ_rel=1.019e-01 (min 9.26e-02) | ratio=0.105 | dead_frac=0.989 | tau_box=[0.0968, 12.1] | 16.1s
+[sg1.2_ls0.05_dx3e+16] dJ_rel=2.750e-01 (min 2.13e-01) | ratio=0.223 | dead_frac=0.988 | tau_box=[0.0968, 12.1] | 16.1s
+[sg1.2_ls0.1_dx3e+16] dJ_rel=2.191e-01 (min 1.81e-01) | ratio=0.177 | dead_frac=0.989 | tau_box=[0.0968, 12.1] | 16.1s
+[sg1.2_ls0.2_dx3e+16] dJ_rel=1.500e-01 (min 1.34e-01) | ratio=0.122 | dead_frac=0.989 | tau_box=[0.0968, 12.1] | 16.1s
+[sg1.8_ls0.05_dx3e+16] dJ_rel=3.311e-01 (min 2.69e-01) | ratio=0.240 | dead_frac=0.986 | tau_box=[0.0968, 12.1] | 16.1s
+[sg1.8_ls0.1_dx3e+16] dJ_rel=2.767e-01 (min 2.39e-01) | ratio=0.200 | dead_frac=0.988 | tau_box=[0.0968, 12.1] | 16.2s
+[sg1.8_ls0.2_dx3e+16] dJ_rel=2.091e-01 (min 1.82e-01) | ratio=0.151 | dead_frac=0.989 | tau_box=[0.0968, 12.1] | 16.2s
+  appended 9 row(s) -> plots_degeneracy/results.jsonl
+
+Summary (this run):
+      sg1.8_ls0.05_dx3e+16 | dJ_rel=3.311e-01 | ratio= 0.240 | dead=0.986 | tau_box=[0.0968,12.1]
+       sg1.8_ls0.1_dx3e+16 | dJ_rel=2.767e-01 | ratio= 0.200 | dead=0.988 | tau_box=[0.0968,12.1]
+      sg1.2_ls0.05_dx3e+16 | dJ_rel=2.750e-01 | ratio= 0.223 | dead=0.988 | tau_box=[0.0968,12.1]
+       sg1.2_ls0.1_dx3e+16 | dJ_rel=2.191e-01 | ratio= 0.177 | dead=0.989 | tau_box=[0.0968,12.1]
+      sg0.8_ls0.05_dx3e+16 | dJ_rel=2.115e-01 | ratio= 0.218 | dead=0.989 | tau_box=[0.0968,12.1]
+       sg1.8_ls0.2_dx3e+16 | dJ_rel=2.091e-01 | ratio= 0.151 | dead=0.989 | tau_box=[0.0968,12.1]
+       sg0.8_ls0.1_dx3e+16 | dJ_rel=1.593e-01 | ratio= 0.164 | dead=0.989 | tau_box=[0.0968,12.1]
+       sg1.2_ls0.2_dx3e+16 | dJ_rel=1.500e-01 | ratio= 0.122 | dead=0.989 | tau_box=[0.0968,12.1]
+       sg0.8_ls0.2_dx3e+16 | dJ_rel=1.019e-01 | ratio= 0.105 | dead=0.989 | tau_box=[0.0968,12.1]

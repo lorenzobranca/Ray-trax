@@ -145,7 +145,13 @@ def compute_radiation_field_from_source_with_time_step(
             I_new = I * jnp.exp(-d_tau) + dI
             tau_new = tau + d_tau
 
-            J_updated = trilinear_op(J, x, y, z, value=I_new, mode="deposit")
+            # Only deposit while the ray is inside the domain; clipping in
+            # trilinear_op otherwise dumps every out-of-box step onto the
+            # nearest boundary voxel, creating spurious bright faces.
+            inside = ((x >= 0) & (x < Nx) &
+                      (y >= 0) & (y < Ny) &
+                      (z >= 0) & (z < Nz)).astype(j_map.dtype)
+            J_updated = trilinear_op(J, x, y, z, value=I_new * inside, mode="deposit")
             x_new = x + direction[0] * step_size
             y_new = y + direction[1] * step_size
             z_new = z + direction[2] * step_size

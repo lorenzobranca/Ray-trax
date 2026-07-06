@@ -169,10 +169,10 @@ params = SimulationParams(
 
 from itertools import product
 
-slopes = [-1.7, -2.0, -2.3]
+slopes = np.linspace(-2.3, -1.7, 50).tolist()
 kmins = 2
 kmaxs =  64
-rms_values = [20, 40, 50] * u.km / u.s
+rms_values = np.linspace(20, 50, 20).tolist() * u.km / u.s
 
 
 for i, (slope, rms) in enumerate(product(slopes, rms_values)):

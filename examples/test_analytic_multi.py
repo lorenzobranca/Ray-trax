@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "4"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 import time
 import jax
@@ -10,15 +10,15 @@ from ray_trax.ray_trax_3D_tdep import compute_radiation_field_from_source_with_t
 from ray_trax.utils import gaussian_emissivity  # must support 3D: (Nx,Ny,Nz, center, amplitude, width)
 
 # ----------------------- domain & parameters -----------------------
-Nx, Ny, Nz = 64, 64, 64
+Nx, Ny, Nz = 128, 128, 128
 kappa0 = 0.1
 L_total = 1.0                      # total luminosity across all sources
 num_sources = 10
 width = 1.5                        # Gaussian width in grid units
-num_rays = 8192
+num_rays = 2048
 step_size = 0.5
 c = 1.0
-dt = 50.0
+dt = 150.0
 
 # Absorption field (uniform here)
 kappa = jnp.ones((Nx, Ny, Nz), dtype=jnp.float32) * kappa0
@@ -121,7 +121,7 @@ def save_slice(plane, index):
     plt.figure(figsize=(12, 4))
     plt.subplot(1, 3, 1); plt.imshow(jnp.log10(num_slice + 1e-10), origin='lower', cmap='inferno'); plt.title(f"Numeric log10(J), {plane}-slice"); plt.colorbar()
     plt.subplot(1, 3, 2); plt.imshow(jnp.log10(an_slice  + 1e-10), origin='lower', cmap='inferno'); plt.title(f"Analytic log10(J), {plane}-slice"); plt.colorbar()
-    plt.subplot(1, 3, 3); plt.imshow(jnp.log10(rel_err + 1e-10), origin='lower', cmap='magma');  plt.title("Relative error log10(|Δ|/J_an)");  plt.colorbar()
+    plt.subplot(1, 3, 3); plt.imshow(jnp.log10(rel_err ), origin='lower', cmap='magma');  plt.title("Relative error log10(|Δ|/J_an)");  plt.colorbar()
     plt.tight_layout()
     plt.savefig(f"plots_3d_multi/slice_{plane}.png"); plt.close()
 

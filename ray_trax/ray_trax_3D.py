@@ -3,12 +3,13 @@ import jax.numpy as jnp
 import numpy as np
 from functools import partial
 from jax.sharding import NamedSharding, PartitionSpec as P
+from jax.experimental.shard_map import shard_map
 
-@partial(jax.jit, static_argnames=["num_rays", "step_size", "max_steps", "use_sharding"])
+@partial(jax.jit, static_argnames=["num_rays", "step_size", "max_steps", "use_sharding", "ray_batch_size"])
 def compute_radiation_field_from_source(
     j_map, kappa_map, source_pos,
     num_rays=1000, step_size=0.5, max_steps=500,
-    use_sharding=False
+    use_sharding=False, ray_batch_size=None,
 ):
     Nx, Ny, Nz = j_map.shape
 
@@ -77,6 +78,9 @@ def compute_radiation_field_from_source(
 
     directions = sample_sphere(num_rays)
 
+    def sum_ray_batch(dir_batch):
+        return jnp.sum(jax.vmap(trace_single_ray)(dir_batch), axis=0)
+
     def trace_single_ray(direction):
         def body_fn(i, state):
             x, y, z, I, tau, J = state
@@ -93,7 +97,13 @@ def compute_radiation_field_from_source(
             dI = j_val * jnp.exp(-tau) * ds
             I_new = I * jnp.exp(-d_tau) + dI
             tau_new = tau + d_tau
-            J = trilinear_op(J, x, y, z, value=I_new, mode="deposit")
+            # Only deposit while the ray is inside the domain; clipping in
+            # trilinear_op otherwise dumps every out-of-box step onto the
+            # nearest boundary voxel, creating spurious bright faces.
+            inside = ((x >= 0) & (x < Nx) &
+                      (y >= 0) & (y < Ny) &
+                      (z >= 0) & (z < Nz)).astype(j_map.dtype)
+            J = trilinear_op(J, x, y, z, value=I_new * inside, mode="deposit")
             x_new = x + direction[0] * ds
             y_new = y + direction[1] * ds
             z_new = z + direction[2] * ds
@@ -119,47 +129,56 @@ def compute_radiation_field_from_source(
         J_all_sharded = trace_ray_batch(directions_sharded)  # [n_devices, rays_per_device, Nx, Ny, Nz]
         J_all = J_all_sharded.reshape((num_rays, *j_map.shape))  # [num_rays, Nx, Ny, Nz]
     '''
+    def batched_sum(dir_all, n_rays):
+        """Sum ray contributions with optional micro-batching to limit peak memory."""
+        if (ray_batch_size is None) or (ray_batch_size >= n_rays):
+            return sum_ray_batch(dir_all)
+        batch  = int(ray_batch_size)
+        n_full = n_rays // batch
+        rem    = n_rays %  batch
+        J_acc  = jnp.zeros_like(j_map)
+        def body(i, acc):
+            db = jax.lax.dynamic_slice_in_dim(dir_all, i * batch, batch, axis=0)
+            return acc + sum_ray_batch(db)
+        J_acc = jax.lax.fori_loop(0, n_full, body, J_acc)
+        if rem:
+            db_tail = jax.lax.dynamic_slice_in_dim(dir_all, n_full * batch, rem, axis=0)
+            J_acc = J_acc + sum_ray_batch(db_tail)
+        return J_acc
+
     if use_sharding:
-        # Build mesh and sharding
-        devices = jax.devices()
-        n_devices = len(devices)
-
+        n_devices = len(jax.devices())
         if num_rays % n_devices != 0:
-            raise ValueError(f"num_rays ({num_rays}) must be divisible by number of devices ({n_devices}).")
+            raise ValueError(
+                f"num_rays ({num_rays}) must be divisible by n_devices ({n_devices})."
+            )
+        rays_per_device = num_rays // n_devices
+        mesh = jax.sharding.Mesh(np.array(jax.devices()), axis_names=('x',))
 
-        mesh_shape = (n_devices,)
-        mesh = jax.sharding.Mesh(np.array(devices).reshape(mesh_shape), axis_names=('x',))
-        sharding = NamedSharding(mesh, P('x', None))  # rays over 'x', each ray is a (3,) vector
+        # Each device sums its local ray batch; psum all-reduces across devices.
+        # j_map / kappa_map are closed over and replicated to all devices automatically.
+        def per_device_sum(dir_chunk):
+            J_local = batched_sum(dir_chunk, rays_per_device)
+            return jax.lax.psum(J_local, axis_name='x')
 
-        # Reshape and shard directions
-        directions_reshaped = directions.reshape((n_devices, -1, 3))
-        directions_sharded = jax.device_put(directions_reshaped, sharding)
-
-        # Apply vmap over each shard
-        @jax.vmap  # Automatically parallel within each device
-        def trace_ray_batch(dir_batch):
-            return jax.vmap(trace_single_ray)(dir_batch)
-
-        with mesh:
-            J_all_sharded = trace_ray_batch(directions_sharded)  # [n_devices, rays_per_device, Nx, Ny, Nz]
-
-        # Merge all rays
-        J_all = J_all_sharded.reshape((num_rays, *j_map.shape))  # [num_rays, Nx, Ny, Nz]
+        J_sum = shard_map(
+            per_device_sum,
+            mesh=mesh,
+            in_specs=(P('x', None),),   # directions sharded along ray axis
+            out_specs=P(),               # output replicated after psum
+            check_rep=False,             # closed-over arrays are implicitly replicated
+        )(directions)
     else:
-        # No sharding: simple vmap over all rays
-        J_all = jax.vmap(trace_single_ray)(directions)
+        J_sum = batched_sum(directions, num_rays)
 
-    # Sum over all rays
-    return jnp.sum(J_all, axis=0) * (4 * jnp.pi / num_rays)
+    return J_sum * (4 * jnp.pi / num_rays)
 
 
 def compute_radiation_field_from_multiple_sources(
     j_map, kappa_map, source_positions,
     num_rays=1000, step_size=0.5, max_steps=500,
-    use_sharding=False
+    use_sharding=False, ray_batch_size=None,
 ):
-    
-
     """
     Computes the total radiation field from multiple sources in 3D using ray tracing.
 
@@ -171,27 +190,22 @@ def compute_radiation_field_from_multiple_sources(
         step_size (float): ray marching step size
         max_steps (int): number of steps per ray
         use_sharding (bool): whether to use multi-GPU parallelization
+        ray_batch_size (int|None): micro-batch rays to limit peak memory; None = all at once
 
     Returns:
         3D array: total radiation field
     """
-
-
-
-    
     J_total = jnp.zeros_like(j_map)
     for source_pos in source_positions:
         J_total += compute_radiation_field_from_source(
-                j_map,
-                kappa_map,
-                source_pos=jnp.array(source_pos),
-                num_rays=num_rays,
-                step_size=step_size,
-                max_steps=max_steps,
-                use_sharding = use_sharding
-
-            )
-
+            j_map, kappa_map,
+            source_pos=jnp.array(source_pos),
+            num_rays=num_rays,
+            step_size=step_size,
+            max_steps=max_steps,
+            use_sharding=use_sharding,
+            ray_batch_size=ray_batch_size,
+        )
     return J_total
 
 

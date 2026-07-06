@@ -79,7 +79,12 @@ def compute_radiation_field_from_source(j_map, kappa_map, source_pos, num_rays=3
 
             I_new = I*jnp.exp(-d_tau) + dI
             tau_new = tau + d_tau
-            J = bilinear_op(J, x, y, value=I_new, mode="deposit")
+            # Only deposit while the ray is inside the domain; clipping in
+            # bilinear_op otherwise dumps every out-of-box step onto the
+            # nearest boundary voxel, creating spurious bright edges.
+            inside = ((x >= 0) & (x < Nx) &
+                      (y >= 0) & (y < Ny)).astype(j_map.dtype)
+            J = bilinear_op(J, x, y, value=I_new * inside, mode="deposit")
             #J = J.at[ix, iy].add(I_new)
             x_new = x + direction[0] * ds
             y_new = y + direction[1] * ds

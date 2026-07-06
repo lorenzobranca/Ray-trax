@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import gc
 
 import time
@@ -74,7 +74,7 @@ filenames = []
 
 J = compute_radiation_field_from_multiple_sources_with_time_step(
         emissivity, kappa, jnp.array([[42., 64., 64.], [86., 64., 64.]]),
-        num_rays=int(16*1024),  
+        num_rays=int(64*1024),  
         step_size=0.5,
         radiation_velocity=c,
         time_step=dt,

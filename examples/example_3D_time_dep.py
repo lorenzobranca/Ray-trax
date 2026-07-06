@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3, 4, 5, 6"
+os.environ["CUDA_VISIBLE_DEVICES"] = "5"
 import gc
 
 import time
@@ -17,20 +17,23 @@ from ray_trax.ray_trax_3D_tdep import (
 )
 
 # Config
-Nx, Ny, Nz = 128, 128, 128
+Nx, Ny, Nz = 128, 129, 128
 key = random.PRNGKey(111)
 
 # Generate absorption field and mask
 kappa, mask = generate_correlated_lognormal_field_3D(
     key, shape=(Nx, Ny, Nz),
     mean=1.0, length_scale=0.05,
-    sigma_g=1.2, percentile=99.99
+    sigma_g=1.2, percentile=99.995
 )
 
+
+kappa = kappa*0.05
 # Get star positions
 star_indices = jnp.argwhere(mask)
 star_positions = star_indices.astype(jnp.float32) + 0.5
 
+print("number of sourses: ", len(star_positions))
 # Create emissivity field
 emissivity = jnp.zeros((Nx, Ny, Nz))
 for pos in star_positions:
@@ -38,8 +41,8 @@ for pos in star_positions:
 
 # Time-stepping parameters
 total_time = 10.0
-dt = 1.0
-c = 1.0  # Speed of light in code units
+dt = 1.
+c = 2.0  # Speed of light in code units
 
 output_dir = 'plots_3d_time_dep'
 os.makedirs(output_dir, exist_ok=True)
@@ -53,26 +56,27 @@ for step in range(int(total_time / dt)):
 
     J_step = compute_radiation_field_from_multiple_sources_with_time_step(
         emissivity, kappa, star_positions,
-        num_rays=4096,
-        step_size=0.5,
+        num_rays=int(4096),
+        step_size=1.5,
         radiation_velocity=c,
         time_step=dt * step,
-        use_sharding=True
+        use_sharding=False,
+        ray_batch_size = 1024
     )
-    
+    '''
     for d in jax.devices():
         print(f"Device {d.id} ({d.device_kind}):")
         print("  allocated:", d.memory_allocated() / 1024**2, "MiB")
         print("  peak     :", d.memory_stats()['max_mem_allocated'] / 1024**2, "MiB")
-
+    '''
     # Force evaluation and break JAX graph
     J_step.block_until_ready()
     J_step = np.array(J_step)
-
+    
     # Plot snapshot
     mid_z = Nz // 2
     plt.figure(figsize=(6, 5))
-    plt.imshow(np.log10(J_step[:, :, mid_z] + 1e-6), origin='lower', cmap='inferno')
+    plt.imshow(np.log10(J_step[:, :, star_indices[20][2]] + 1e-6), origin='lower', cmap='inferno')
     plt.title(f"X-Y plane at Z={mid_z} - Time step {step+1}")
     plt.xlabel("X")
     plt.ylabel("Y")
@@ -86,7 +90,7 @@ for step in range(int(total_time / dt)):
     del J_step               # drop Python reference
     gc.collect()             # free DeviceArray objects
     jax.clear_caches()     # tear down compiled executables
-
+    
 tend = time.time()
 print("Total simulation time:", tend - tstart)
 
