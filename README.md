@@ -74,10 +74,9 @@ import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
 
-# If installed as a package/module, use:
-# from ray_trax.ray_trax_3D_tdep import ...
-# Otherwise, if the file is in the same folder, use:
-from ray_trax_3D_tdep import (
+# Run from the repository root (or add it to PYTHONPATH); the solvers
+# share primitives in ray_trax/core.py, so import them as a package:
+from ray_trax.ray_trax_3D_tdep import (
     compute_radiation_field_from_source_with_time_step,
     compute_radiation_field_from_multiple_sources_with_time_step,
 )
