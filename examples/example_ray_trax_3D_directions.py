@@ -1,6 +1,7 @@
 # test_analytic_multi_direction.py
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"  # change as needed
+from autocvd import autocvd
+autocvd(num_gpus=1)   # pick a free GPU; must run before importing jax
 
 import time
 import numpy as np

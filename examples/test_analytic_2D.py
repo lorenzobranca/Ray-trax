@@ -1,5 +1,6 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"
+from autocvd import autocvd
+autocvd(num_gpus=1)   # pick a free GPU; must run before importing jax
 
 import jax
 import jax.numpy as jnp

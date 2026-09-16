@@ -14,14 +14,10 @@
 # THEY BLOCK THE GPU MEMORY IF NOT
 # RESET PROPERLY
 import os
-# set the correct GPU
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-# you may also use
-# # ==== GPU selection ====
-# from autocvd import autocvd
-# autocvd(num_gpus = 1)
-# # =======================
-# in regular python scripts
+# ==== GPU selection ====
+from autocvd import autocvd
+autocvd(num_gpus=1)   # pick a free GPU; must run before importing jax
+# =======================
 
 # numerics
 import jax
