@@ -93,9 +93,9 @@ def compute_radiation_field_from_source_with_time_step_direction(
             # Only deposit while the ray is inside the domain; clipping in
             # trilinear_op otherwise dumps every out-of-box step onto the
             # nearest boundary voxel, creating spurious bright faces.
-            inside = ((x >= 0) & (x < Nx) &
-                      (y >= 0) & (y < Ny) &
-                      (z >= 0) & (z < Nz)).astype(j_map.dtype)
+            inside = ((x >= 0) & (x <= Nx - 1) &
+                      (y >= 0) & (y <= Ny - 1) &
+                      (z >= 0) & (z <= Nz - 1)).astype(j_map.dtype)
             I_dep = I_new * inside
             J = trilinear_op(J, x, y, z, value=I_dep, mode="deposit")
             D = deposit_vector(D, x, y, z, direction, I_dep)

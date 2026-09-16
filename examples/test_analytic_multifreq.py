@@ -242,6 +242,11 @@ plt.close()
 print("Saved plots_multifreq/attenuation_ratio.png")
 
 # 3. Midplane slices for all bins
+# Calibrated analytic field on the grid: J_an[..., i] = C L/(4π r²) exp(−κ_i r).
+# r is floored at half a cell so the source voxel does not blow up.
+r_safe = np.maximum(np.array(r), 0.5)
+J_an = np.stack([C_calib * L / (4 * np.pi * r_safe**2) * np.exp(-float(kappa_vals_grid[i]) * r_safe)
+                 for i in range(n_freq)], axis=-1)   # (Nx, Ny, Nz, n_freq)
 fig, axes = plt.subplots(2, n_freq, figsize=(4 * n_freq, 8))
 for i in range(n_freq):
     J_slice_num = np.log10(np.array(J_num[:, iy0, :, i]) + 1e-30)

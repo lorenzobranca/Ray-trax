@@ -1,5 +1,6 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+from autocvd import autocvd
+autocvd(num_gpus=1)   # pick a free GPU; must run before importing jax
 
 import time
 import jax
@@ -121,7 +122,7 @@ def save_slice(plane, index):
     plt.figure(figsize=(12, 4))
     plt.subplot(1, 3, 1); plt.imshow(jnp.log10(num_slice + 1e-10), origin='lower', cmap='inferno'); plt.title(f"Numeric log10(J), {plane}-slice"); plt.colorbar()
     plt.subplot(1, 3, 2); plt.imshow(jnp.log10(an_slice  + 1e-10), origin='lower', cmap='inferno'); plt.title(f"Analytic log10(J), {plane}-slice"); plt.colorbar()
-    plt.subplot(1, 3, 3); plt.imshow(jnp.log10(rel_err ), origin='lower', cmap='magma');  plt.title("Relative error log10(|Δ|/J_an)");  plt.colorbar()
+    plt.subplot(1, 3, 3); plt.imshow(jnp.log10(rel_err + 1e-10), origin='lower', cmap='magma');  plt.title("Relative error log10(|Δ|/J_an)");  plt.colorbar()
     plt.tight_layout()
     plt.savefig(f"plots_3d_multi/slice_{plane}.png"); plt.close()
 

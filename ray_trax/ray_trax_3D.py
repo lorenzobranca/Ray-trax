@@ -100,17 +100,17 @@ def compute_radiation_field_from_source(
             # Only deposit while the ray is inside the domain; clipping in
             # trilinear_op otherwise dumps every out-of-box step onto the
             # nearest boundary voxel, creating spurious bright faces.
-            inside = ((x >= 0) & (x < Nx) &
-                      (y >= 0) & (y < Ny) &
-                      (z >= 0) & (z < Nz)).astype(j_map.dtype)
+            inside = ((x >= 0) & (x <= Nx - 1) &
+                      (y >= 0) & (y <= Ny - 1) &
+                      (z >= 0) & (z <= Nz - 1)).astype(j_map.dtype)
             J = trilinear_op(J, x, y, z, value=I_new * inside, mode="deposit")
             x_new = x + direction[0] * ds
             y_new = y + direction[1] * ds
             z_new = z + direction[2] * ds
             return (x_new, y_new, z_new, I_new, tau_new, J)
 
-        x0, y0, z0 = source_pos
-        initial = (x0, y0, z0, 0.0, 0.0, jnp.zeros_like(j_map))
+        x0, y0, z0 = jnp.asarray(source_pos, j_map.dtype)  # float carry even for int voxel tuples
+        initial = (x0, y0, z0, 0.0, 0.0, jnp.zeros(j_map.shape, j_map.dtype))  # not zeros_like: avoid sharding inheritance
         _, _, _, _, _, J_ray = jax.lax.fori_loop(0, max_steps, body_fn, initial)
         return J_ray
     '''
@@ -136,7 +136,7 @@ def compute_radiation_field_from_source(
         batch  = int(ray_batch_size)
         n_full = n_rays // batch
         rem    = n_rays %  batch
-        J_acc  = jnp.zeros_like(j_map)
+        J_acc  = jnp.zeros(j_map.shape, j_map.dtype)  # not zeros_like: avoid sharding inheritance
         def body(i, acc):
             db = jax.lax.dynamic_slice_in_dim(dir_all, i * batch, batch, axis=0)
             return acc + sum_ray_batch(db)

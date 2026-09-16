@@ -1,5 +1,6 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+from autocvd import autocvd
+autocvd(num_gpus=1)   # pick a free GPU; must run before importing jax
 import gc
 
 import time
@@ -39,11 +40,12 @@ c = 1.0  # Speed of light in code units
 output_dir = 'plots_3d_time_dep'
 os.makedirs(output_dir, exist_ok=True)
 
-# --- configuration for the 3x2 panel (bin #2 = third bin) ---
+# --- configuration for the 3x2 panel of mid-Z slices at selected steps ---
+# (this example is single-frequency: the solver returns (Nx, Ny, Nz), so
+#  the panel shows the total field, not a per-bin slice)
 selected_steps = [2, 4, 8, 11, 15, 19]   # 1-based steps
-bin_index = 2                              # zero-based -> third bin
 n_steps_total = int(total_time / dt)
-snapshots_bin2 = {}                        # step -> 2D log10 slice
+snapshots = {}                             # step -> 2D log10 slice
 mid_z = Nz // 2
 
 tstart = time.time()
@@ -78,26 +80,10 @@ for step in range(n_steps_total):
     filenames.append(filename)
     plt.close()
 
-    # ----- store bin-2 mid-Z slice for the selected steps -----
+    # ----- store mid-Z slice for the selected steps -----
     s = step + 1  # 1-based
     if s in selected_steps:
-        if J_step.ndim == 4:
-            # Accept (Nx,Ny,Nz,B) or (B,Nx,Ny,Nz)
-            if J_step.shape[-1] > bin_index and J_step.shape[2] == Nz:
-                # layout: (Nx, Ny, Nz, B)
-                Jb = J_step[:, :, mid_z, bin_index]
-            elif J_step.shape[0] > bin_index and J_step.shape[1] == Nx:
-                # layout: (B, Nx, Ny, Nz)
-                Jb = J_step[bin_index, :, :, mid_z]
-            else:
-                raise ValueError(
-                    f"Unexpected per-bin shape {J_step.shape}; "
-                    "expected (Nx,Ny,Nz,B) or (B,Nx,Ny,Nz)."
-                )
-            snapshots_bin2[s] = np.log10(Jb + 1e-6)
-        else:
-            print("[warning] J_step has no bin dimension (ndim != 4); "
-                  "cannot extract a per-bin panel for this step.")
+        snapshots[s] = np.log10(J_step[:, :, mid_z] + 1e-6)
 
     # Free memory
     del J_step
@@ -115,14 +101,14 @@ with imageio.get_writer(gif_filename, mode='I', duration=0.5, loop=0) as writer:
         writer.append_data(image)
 print("GIF saved to", gif_filename)
 
-# ----- Build the 3x2 panel for frequency bin #2 (third bin) -----
-missing = [s for s in selected_steps if s not in snapshots_bin2]
+# ----- Build the 3x2 panel of mid-Z slices -----
+missing = [s for s in selected_steps if s not in snapshots]
 if missing:
     print(f"[warning] missing snapshots for steps {missing}; panel will skip them.")
 
-if snapshots_bin2:
+if snapshots:
     # Use a common color scale across subplots
-    vals = [snapshots_bin2[s] for s in selected_steps if s in snapshots_bin2]
+    vals = [snapshots[s] for s in selected_steps if s in snapshots]
     vmin = min(float(x.min()) for x in vals)
     vmax = max(float(x.max()) for x in vals)
 
@@ -131,9 +117,9 @@ if snapshots_bin2:
 
     for i, s in enumerate(selected_steps):
         ax = axes[i]
-        if s in snapshots_bin2:
+        if s in snapshots:
             im = ax.imshow(
-                snapshots_bin2[s],
+                snapshots[s],
                 origin='lower',
                 cmap='inferno',
                 vmin=vmin,
@@ -156,13 +142,13 @@ if snapshots_bin2:
     # Single shared colorbar
     if 'im' in locals():
         cbar = fig.colorbar(im, ax=axes.tolist(), shrink=0.88, pad=0.02)
-        cbar.set_label("log10(Intensity) in bin #2")
+        cbar.set_label("log10(Intensity)")
 
-    panel_path = os.path.join(output_dir, "bin2_steps_3x2.png")
+    panel_path = os.path.join(output_dir, "steps_3x2.png")
     plt.savefig(panel_path, dpi=180)
     plt.close(fig)
-    print("Saved 3x2 bin-2 panel to", panel_path)
+    print("Saved 3x2 panel to", panel_path)
 else:
-    print("[info] No bin-2 snapshots collected; panel not created.")
+    print("[info] No snapshots collected; panel not created.")
 
 

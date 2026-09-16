@@ -1,6 +1,7 @@
 # main_3D_time_dep_turb_multinu.py
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+from autocvd import autocvd
+autocvd(num_gpus=1)   # pick a free GPU; must run before importing jax
 import gc
 import time
 import numpy as np

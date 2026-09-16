@@ -94,10 +94,10 @@ def compute_radiation_field_from_source_with_time_step(
 
 
     def trace_single_ray(direction):
-        x, y, z = source_pos
+        x, y, z = jnp.asarray(source_pos, j_map.dtype)  # float carry even for int voxel tuples
         I = 0.0
         tau = 0.0
-        J = jnp.zeros_like(j_map)
+        J = jnp.zeros(j_map.shape, j_map.dtype)  # not zeros_like: avoid sharding inheritance
 
         def body_fn(i, state):
             x, y, z, I, tau, J = state
@@ -116,9 +116,9 @@ def compute_radiation_field_from_source_with_time_step(
             # Only deposit while the ray is inside the domain; clipping in
             # trilinear_op otherwise dumps every out-of-box step onto the
             # nearest boundary voxel, creating spurious bright faces.
-            inside = ((x >= 0) & (x < Nx) &
-                      (y >= 0) & (y < Ny) &
-                      (z >= 0) & (z < Nz)).astype(j_map.dtype)
+            inside = ((x >= 0) & (x <= Nx - 1) &
+                      (y >= 0) & (y <= Ny - 1) &
+                      (z >= 0) & (z <= Nz - 1)).astype(j_map.dtype)
             J = trilinear_op(J, x, y, z, value=I_new * inside, mode="deposit")
 
             x_new = x + direction[0] * step_size
@@ -146,7 +146,7 @@ def compute_radiation_field_from_source_with_time_step(
             rem    = num_rays % batch                   # static
 
             # Full batches (size = batch, static)
-            J_acc = jnp.zeros_like(j_map)
+            J_acc = jnp.zeros(j_map.shape, j_map.dtype)
             def body_full(i, acc):
                 start = i * batch
                 # slice_size is static (= batch)
@@ -191,7 +191,7 @@ def compute_radiation_field_from_source_with_time_step(
         else:
             nb  = rays_per_device // per_dev_batch
             rem = rays_per_device %  per_dev_batch
-            J_acc = jnp.zeros_like(j_map)
+            J_acc = jnp.zeros(j_map.shape, j_map.dtype)  # not zeros_like: avoid sharding inheritance
 
             def body_full(i, acc):
                 start = i * per_dev_batch

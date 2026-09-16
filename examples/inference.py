@@ -1,6 +1,7 @@
 # inference.py — cleaned
 import os, time
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "3")
+from autocvd import autocvd
+autocvd(num_gpus=1)   # pick a free GPU; must run before importing jax
 
 import jax
 import jax.numpy as jnp

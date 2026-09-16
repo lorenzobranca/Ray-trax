@@ -145,9 +145,9 @@ def compute_radiation_field_multifreq(
             # onto the nearest boundary voxel, piling up spurious flux on the
             # domain faces. `inside` depends only on ray geometry (not on
             # j/kappa/n_HI), so it carries no gradient and stays JIT-safe.
-            inside = ((x >= 0) & (x < Nx) &
-                      (y >= 0) & (y < Ny) &
-                      (z >= 0) & (z < Nz)).astype(j_map.dtype)
+            inside = ((x >= 0) & (x <= Nx - 1) &
+                      (y >= 0) & (y <= Ny - 1) &
+                      (z >= 0) & (z <= Nz - 1)).astype(j_map.dtype)
             J_new = trilinear_op(J, x, y, z, value=I_new * inside, mode="deposit")
 
             return (x + direction[0] * ds,
@@ -155,7 +155,7 @@ def compute_radiation_field_multifreq(
                     z + direction[2] * ds,
                     I_new, tau_new, J_new)
 
-        x0, y0, z0 = source_pos
+        x0, y0, z0 = jnp.asarray(source_pos, j_map.dtype)  # float carry even for int voxel tuples
         init = (x0, y0, z0,
                 jnp.zeros(n_freq),
                 jnp.zeros(n_freq),
@@ -215,6 +215,7 @@ def compute_radiation_field_multifreq_multisource(
     j_map, kappa_map, source_positions,
     num_rays=1000, step_size=0.5, max_steps=500,
     use_sharding=False, ray_batch_size=None,
+    kappa_interp="nearest",
 ):
     """
     Sum multi-frequency radiation fields from multiple point sources.
@@ -224,6 +225,7 @@ def compute_radiation_field_multifreq_multisource(
     j_map            : (Nx, Ny, Nz, n_freq)
     kappa_map        : (Nx, Ny, Nz, n_freq)
     source_positions : (N_sources, 3) or list of 3-tuples, grid coordinates
+    kappa_interp     : "nearest" or "trilinear", forwarded to compute_radiation_field_multifreq
 
     Returns
     -------
@@ -239,5 +241,6 @@ def compute_radiation_field_multifreq_multisource(
             max_steps=max_steps,
             use_sharding=use_sharding,
             ray_batch_size=ray_batch_size,
+            kappa_interp=kappa_interp,
         )
     return J_total
